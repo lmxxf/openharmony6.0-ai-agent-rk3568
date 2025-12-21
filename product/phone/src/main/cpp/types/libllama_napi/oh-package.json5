@@ -1,0 +1,4 @@
+{
+  "name": "libllama_napi.so",
+  "types": "./index.d.ts"
+}
