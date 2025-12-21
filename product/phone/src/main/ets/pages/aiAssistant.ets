@@ -15,8 +15,18 @@ interface ChatMessage {
   timestamp: number;
 }
 
-// 模型路径配置
-const MODEL_PATH = '/data/storage/el2/base/files/qwen3-0.6b-q4.gguf';
+// 模型配置
+interface ModelConfig {
+  name: string;
+  path: string;
+  size: string;
+}
+
+const AVAILABLE_MODELS: ModelConfig[] = [
+  { name: 'Qwen2.5-0.5B', path: '/data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf', size: '470MB' },
+  { name: 'Qwen3-0.6B', path: '/data/storage/el2/base/files/qwen3-0.6b-q4.gguf', size: '381MB' },
+];
+
 const N_THREADS = 8;
 
 @Entry
@@ -27,6 +37,8 @@ struct AiAssistant {
   @State isLoading: boolean = false;
   @State modelStatus: string = '模型未加载';
   @State modelLoaded: boolean = false;
+  @State currentModelIndex: number = 0;
+  @State showModelPicker: boolean = false;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear() {
@@ -40,30 +52,40 @@ struct AiAssistant {
   }
 
   loadModel() {
-    this.modelStatus = '正在加载模型...';
+    const model = AVAILABLE_MODELS[this.currentModelIndex];
+    this.modelStatus = `正在加载 ${model.name}...`;
 
-    // 使用 TaskPool 在后台线程加载模型
     LogUtil.info("LlamaNAPI: llama object type: " + typeof llama);
     if (typeof llama === "undefined" || llama === null) {
       this.modelStatus = "模块导入失败";
       return;
     }
     try {
-      const success: boolean = llama.loadModel(MODEL_PATH, N_THREADS);
+      const success: boolean = llama.loadModel(model.path, N_THREADS);
       if (success) {
-        this.modelStatus = 'Qwen3-0.6B 已加载';
+        this.modelStatus = `${model.name} 已加载`;
         this.modelLoaded = true;
-        LogUtil.info('Model loaded successfully');
+        LogUtil.info('Model loaded successfully: ' + model.name);
       } else {
-        this.modelStatus = '模型加载失败';
+        this.modelStatus = `${model.name} 加载失败`;
         this.modelLoaded = false;
-        LogUtil.error('Failed to load model');
+        LogUtil.error('Failed to load model: ' + model.name);
       }
     } catch (error) {
       this.modelStatus = '模型加载出错';
       this.modelLoaded = false;
       LogUtil.error('Error loading model: ' + JSON.stringify(error));
     }
+  }
+
+  switchModel(index: number) {
+    if (index === this.currentModelIndex && this.modelLoaded) {
+      return;
+    }
+    this.currentModelIndex = index;
+    this.modelLoaded = false;
+    this.messages = [];
+    this.loadModel();
   }
 
   build() {
@@ -84,18 +106,18 @@ struct AiAssistant {
 
         Blank()
 
-        if (!this.modelLoaded) {
-          Button('重新加载')
-            .fontSize(12)
-            .height(28)
-            .onClick(() => {
-              this.loadModel();
-            })
-        }
+        Button('切换模型')
+          .fontSize(12)
+          .height(28)
+          .backgroundColor('#007AFF')
+          .onClick(() => {
+            this.showModelPicker = true;
+          })
       }
       .width(ConfigData.WH_100_100)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .backgroundColor('#f5f5f5')
+      .bindMenu(this.showModelPicker, this.ModelPickerMenu())
 
       // 聊天消息列表
       Scroll(this.scroller) {
@@ -111,7 +133,7 @@ struct AiAssistant {
                 .fontSize(24)
                 .fontWeight(FontWeight.Bold)
                 .margin({ top: 16 })
-              Text('基于 Qwen3-0.6B 本地模型')
+              Text(`当前模型: ${AVAILABLE_MODELS[this.currentModelIndex].name}`)
                 .fontSize(14)
                 .fontColor('#999999')
                 .margin({ top: 8 })
@@ -185,6 +207,24 @@ struct AiAssistant {
     .width(ConfigData.WH_100_100)
     .height(ConfigData.WH_100_100)
     .backgroundColor('#f5f5f5')
+  }
+
+  @Builder
+  ModelPickerMenu() {
+    Menu() {
+      ForEach(AVAILABLE_MODELS, (model: ModelConfig, index: number) => {
+        MenuItem({
+          content: `${model.name} (${model.size})`,
+        })
+          .selected(index === this.currentModelIndex)
+          .onChange((selected: boolean) => {
+            if (selected) {
+              this.showModelPicker = false;
+              this.switchModel(index);
+            }
+          })
+      })
+    }
   }
 
   @Builder
