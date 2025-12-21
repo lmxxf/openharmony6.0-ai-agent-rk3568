@@ -98,6 +98,19 @@ hdc shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos.settings/files
 - `20010018` 是 Settings 应用的 UID（20010000 + 应用序号）
 - 必须 `chown` 修改文件所有者，否则应用无法读取 root 创建的文件
 
+**OpenHarmony vs Android 路径对比：**
+
+| Android | OpenHarmony | 说明 |
+|---------|-------------|------|
+| `/data/data/包名/` | `/data/app/el2/100/base/包名/` | OH 多了 el2、100 层级 |
+| `/data/user/0/包名/` | 同上 | Android 的 0 对应 OH 的 100 |
+| DE (Device Encrypted) | el1 | 设备加密存储 |
+| CE (Credential Encrypted) | el2 | 用户解锁后可访问 |
+| UID 10000+ | UID 20010000+ | 应用 UID 基数不同 |
+| `Context.getFilesDir()` | `/data/storage/el2/base/files/` | 虚拟路径映射 |
+
+OpenHarmony 的沙箱设计基本照搬 Android，但路径更长、文档更少、调试更痛苦。
+
 ### 5. 使用 AI 助手
 打开设置应用 → 点击"AI 助手"入口 → 等待模型加载完成后即可对话
 
