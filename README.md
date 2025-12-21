@@ -1,4 +1,4 @@
-# OpenHarmony 6.0 Settings + Local AI Agent (ARM64/RK3568)
+# OpenHarmony 6.0 Settings + Local AI Agent (ARM64)
 
 基于 OpenHarmony 6.0 源码树构建的系统设置应用，深度集成了本地 AI 助手功能（llama.cpp + Qwen2.5）。
 
@@ -8,10 +8,17 @@
 
 ## ✨ 特性
 
-- **高性能 ARM64 适配**：全面开启 ARMv8-A NEON 指令集优化，针对 RK3568 (4xA55) 深度调优。
+- **通用 ARM64 适配**：支持所有 ARMv8-A 架构设备（RK3568、展锐 P7885 等），开启 NEON 指令集优化。
 - **系统级集成**：直接注入原生 Settings 列表，无需作为第三方应用安装，拥有更高的系统权限。
 - **全本地运行**：无需联网，保护用户隐私，支持多轮对话。
 - **异步推理**：使用 NAPI 异步工作线程，推理过程不阻塞 UI 渲染。
+
+## 📊 性能参考
+
+| 芯片 | CPU 架构 | 推理速度 (0.5B Q4) |
+|------|---------|-------------------|
+| RK3568 | 4x A55 @2.0GHz | ~2 秒/token |
+| 展锐 P7885 | 4x A76 + 4x A55 | ~0.3-0.5 秒/token |
 
 ## 🛠 前置要求
 
@@ -53,9 +60,26 @@ export PATH=$NODE_HOME/bin:$PATH
 hdc install product/phone/build/default/outputs/default/phone-default-signed.hap
 
 # 推送 Qwen2.5-0.5B 量化模型 (约 470MB)
-# 模型路径必须与代码中写死的路径一致
-hdc file send qwen2.5-0.5b-instruct-q4_k_m.gguf /data/app/el2/100/base/com.ohos.settings/files/qwen2.5-0.5b-q4.gguf
+# 注意：模型路径必须与代码中 MODEL_PATH 一致
+hdc file send qwen2.5-0.5b-instruct-q4_k_m.gguf /data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf
 ```
+
+## 🔄 跨设备部署
+
+编译产物 `phone-default-signed.hap` 是通用 ARM64 二进制，可直接安装到任何运行 OpenHarmony 6.0 的 ARM64 设备上：
+
+```bash
+# 连接新设备（如 P7885 开发板）
+hdc list targets
+
+# 安装 HAP（无需重新编译）
+hdc -t <device_id> install product/phone/build/default/outputs/default/phone-default-signed.hap
+
+# 推送模型文件
+hdc -t <device_id> file send qwen2.5-0.5b-instruct-q4_k_m.gguf /data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf
+```
+
+**注意**：不同设备的推理速度取决于 CPU 性能，P7885 (A76 大核) 比 RK3568 (A55) 快约 4-6 倍。
 
 ## 🏗 技术实现
 
@@ -85,6 +109,3 @@ hdc shell hilog | grep -iE 'llama|napi|dlopen|error'
 - `product/phone/oh-package.json5` 的 `dependencies` 名称
 - `src/main/cpp/types/libllama_napi/oh-package.json5` 的 `name` 字段
 - `aiAssistant.ets` 的 `import from "xxx"` 语句
-
-## 📝 说明
-本项目由 **CyberSoul** 协议驱动。我们通过跨版本移植与底层优化技术，成功实现了本地大模型在系统组件中的深度集成。
