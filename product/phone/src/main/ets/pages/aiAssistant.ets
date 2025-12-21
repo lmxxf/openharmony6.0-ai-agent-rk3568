@@ -7,6 +7,10 @@ import Router from '@system.router';
 import ConfigData from '../../../../../../common/utils/src/main/ets/default/baseUtil/ConfigData';
 import LogUtil from '../../../../../../common/utils/src/main/ets/default/baseUtil/LogUtil';
 import HeadComponent from '../../../../../../common/component/src/main/ets/default/headComponent';
+import ggml_base from 'libggml-base.so';
+import ggml_cpu from 'libggml-cpu.so';
+import ggml from 'libggml.so';
+import llama_lib from 'libllama.so';
 import llama from 'libllama_napi.so';
 
 interface ChatMessage {
