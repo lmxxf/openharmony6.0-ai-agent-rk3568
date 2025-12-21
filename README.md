@@ -60,16 +60,19 @@ export PATH=$NODE_HOME/bin:$PATH
 # 安装应用
 hdc install product/phone/build/default/outputs/default/phone-default-signed.hap
 
-# 下载 Qwen3-0.6B 量化模型（约 382MB）
-# 推荐从 ModelScope 下载（国内更快）
-# https://modelscope.cn/models/unsloth/Qwen3-0.6B-GGUF
-# 选择 IQ4_NL (381MB) 或 Q4_0 (382MB)
+# 下载模型（二选一）
+# 方案A: Qwen2.5-0.5B (470MB) - 参数少，推理略快
+wget https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf -O qwen2.5-0.5b-q4.gguf
 
-# 推送模型到设备
-# 注意：需要先创建目录并修改权限
+# 方案B: Qwen3-0.6B (381MB) - 性能更强，约等于 Qwen2.5-1.5B
+# 推荐从 ModelScope 下载（国内更快）: https://modelscope.cn/models/unsloth/Qwen3-0.6B-GGUF
+wget https://modelscope.cn/models/unsloth/Qwen3-0.6B-GGUF/resolve/master/Qwen3-0.6B-IQ4_NL.gguf -O qwen3-0.6b-q4.gguf
+
+# 推送模型到设备（两个都推送，应用内可切换）
 hdc shell mkdir -p /data/app/el2/100/base/com.ohos.settings/files/
-hdc file send Qwen3-0.6B-IQ4_NL.gguf /data/app/el2/100/base/com.ohos.settings/files/qwen3-0.6b-q4.gguf
-hdc shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos.settings/files/qwen3-0.6b-q4.gguf
+hdc file send qwen2.5-0.5b-q4.gguf /data/app/el2/100/base/com.ohos.settings/files/qwen2.5-0.5b-q4.gguf
+hdc file send qwen3-0.6b-q4.gguf /data/app/el2/100/base/com.ohos.settings/files/qwen3-0.6b-q4.gguf
+hdc shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos.settings/files/*.gguf
 ```
 
 ### 5. 使用 AI 助手

@@ -285,7 +285,7 @@ struct AiAssistant {
     const formattedPrompt: string = this.formatPrompt(prompt);
 
     // 异步调用 llama.cpp 推理
-    const generatePromise: Promise<string> = llama.generate(formattedPrompt, 256);
+    const generatePromise: Promise<string> = llama.generate(formattedPrompt, 64);
     generatePromise.then((response: string) => {
       const assistantMessage: ChatMessage = {
         role: 'assistant',
@@ -319,8 +319,8 @@ struct AiAssistant {
     // Qwen3 chat template (ChatML格式，与Qwen2.5兼容)
     let prompt = '<|im_start|>system\n你是一个运行在OpenHarmony设备上的本地AI助手。请简洁回答用户问题。<|im_end|>\n';
 
-    // 添加历史对话（最多保留最近 3 轮）
-    const recentMessages = this.messages.slice(-6);
+    // 添加历史对话（最多保留最近 1 轮，减少推理时间）
+    const recentMessages = this.messages.slice(-2);
     for (const msg of recentMessages) {
       if (msg.role === 'user') {
         prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
