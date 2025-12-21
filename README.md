@@ -75,6 +75,29 @@ hdc file send qwen3-0.6b-q4.gguf /data/app/el2/100/base/com.ohos.settings/files/
 hdc shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos.settings/files/*.gguf
 ```
 
+**关于 OpenHarmony 沙箱路径的说明：**
+
+你会发现代码里用的路径和 hdc 推送的路径不一样：
+- 代码里用: `/data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf`
+- hdc 推送用: `/data/app/el2/100/base/com.ohos.settings/files/qwen2.5-0.5b-q4.gguf`
+
+这是因为 OpenHarmony 使用**应用沙箱机制**，每个应用只能看到自己的虚拟文件系统：
+
+| 路径组成 | 含义 |
+|---------|------|
+| `/data/storage/` | 应用看到的虚拟根路径 |
+| `/data/app/` | 系统实际的物理路径 |
+| `el1` | Encryption Level 1 - 设备级加密，开机即可访问 |
+| `el2` | Encryption Level 2 - 用户级加密，解锁后才能访问 |
+| `100` | 用户 ID，主用户固定为 100（多用户时会有 101、102...） |
+| `base` | 应用基础数据目录（还有 database、cache 等） |
+| `com.ohos.settings` | 应用包名 |
+| `files` | 应用的文件存储目录 |
+
+**权限说明：**
+- `20010018` 是 Settings 应用的 UID（20010000 + 应用序号）
+- 必须 `chown` 修改文件所有者，否则应用无法读取 root 创建的文件
+
 ### 5. 使用 AI 助手
 打开设置应用 → 点击"AI 助手"入口 → 等待模型加载完成后即可对话
 
