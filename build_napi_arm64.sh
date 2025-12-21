@@ -4,7 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 SDK_BASE="$SOURCE_ROOT/prebuilts/ohos-sdk/linux"
-OHOS_SDK_ROOT=$(ls -d $SDK_BASE/* 2>/dev/null | sort -V | tail -n 1)
+export OHOS_SDK_ROOT=$(ls -d $SDK_BASE/* 2>/dev/null | sort -V | tail -n 1)
 OHOS_CLANG_ROOT="$SOURCE_ROOT/prebuilts/clang/ohos/linux-x86_64/llvm"
 SYSROOT="$OHOS_SDK_ROOT/native/sysroot"
 
@@ -19,7 +19,7 @@ cp "$LLAMA_BUILD_DIR"/lib*.so "$LIBS_DIR/"
 cd "$LIBS_DIR"
 
 sanitize_lib() {
-    [ -L "$1" ] && { target=$(readlink "$1"); rm "$1"; cp "$target" "$1"; }
+    if [ -L "$1" ]; then target=$(readlink "$1"); rm "$1"; cp "$target" "$1"; fi
 }
 for lib in libllama.so libggml.so libggml-base.so libggml-cpu.so; do
     sanitize_lib $lib

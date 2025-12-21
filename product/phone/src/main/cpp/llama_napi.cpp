@@ -353,6 +353,7 @@ static napi_value StopGeneration(napi_env env, napi_callback_info info) {
 
 // Module initialization
 static napi_value Init(napi_env env, napi_value exports) {
+    LOGI("LlamaNAPI: Native module Init calling...");
     // Initialize llama backend
     llama_backend_init();
 

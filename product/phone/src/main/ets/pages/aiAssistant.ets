@@ -7,11 +7,7 @@ import Router from '@system.router';
 import ConfigData from '../../../../../../common/utils/src/main/ets/default/baseUtil/ConfigData';
 import LogUtil from '../../../../../../common/utils/src/main/ets/default/baseUtil/LogUtil';
 import HeadComponent from '../../../../../../common/component/src/main/ets/default/headComponent';
-import ggml_base from 'libggml-base.so';
-import ggml_cpu from 'libggml-cpu.so';
-import ggml from 'libggml.so';
-import llama_lib from 'libllama.so';
-import llama from 'libllama_napi.so';
+import llama from "llama_napi";
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -47,6 +43,11 @@ struct AiAssistant {
     this.modelStatus = '正在加载模型...';
 
     // 使用 TaskPool 在后台线程加载模型
+    LogUtil.info("LlamaNAPI: llama object type: " + typeof llama);
+    if (typeof llama === "undefined" || llama === null) {
+      this.modelStatus = "模块导入失败";
+      return;
+    }
     try {
       const success: boolean = llama.loadModel(MODEL_PATH, N_THREADS);
       if (success) {

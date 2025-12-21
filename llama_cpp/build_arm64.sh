@@ -5,7 +5,7 @@ SOURCE_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 # 自动探测 SDK 版本
 SDK_BASE="$SOURCE_ROOT/prebuilts/ohos-sdk/linux"
-OHOS_SDK_ROOT=$(ls -d $SDK_BASE/* 2>/dev/null | sort -V | tail -n 1)
+export OHOS_SDK_ROOT=$(ls -d $SDK_BASE/* 2>/dev/null | sort -V | tail -n 1)
 
 if [ ! -d "$OHOS_SDK_ROOT" ]; then
     echo "Error: Could not find OHOS SDK in $SDK_BASE"
@@ -29,6 +29,7 @@ cmake .. \
     -DLLAMA_BUILD_TESTS=OFF \
     -DLLAMA_BUILD_EXAMPLES=OFF \
     -DLLAMA_BUILD_SERVER=OFF \
-    -DBUILD_SHARED_LIBS=ON
+    -DBUILD_SHARED_LIBS=ON \
+    -DLLAMA_CURL=OFF
 
 cmake --build . -j$(nproc) --target llama
