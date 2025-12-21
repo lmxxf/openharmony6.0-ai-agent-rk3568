@@ -62,7 +62,29 @@ hdc file send qwen2.5-0.5b-instruct-q4_k_m.gguf /data/app/el2/100/base/com.ohos.
 - **底层引擎**：`llama.cpp` 交叉编译为 aarch64-linux-ohos。
 - **胶水层**：自定义 NAPI 封装，提供 `loadModel()` 和 `generate()` 接口。
 - **UI 框架**：ArkTS (ArkUI)，通过代码注入方式修改原生 `settingList.ets`。
-- **依赖管理**：使用 `patchelf` 将运行时依赖路径硬编码为 `$ORIGIN`，解决 OpenHarmony 共享库加载问题。
+- **依赖管理**：
+  - 使用 `patchelf --set-rpath '$ORIGIN'` 将运行时依赖路径硬编码为同级目录
+  - 使用 `patchelf --replace-needed` 清除 `.so.0` 版本号后缀依赖（llama.cpp 编译产物默认带版本号）
+- **NAPI 模块规范**：
+  - `oh-package.json5` 的 `name` 字段必须与 ArkTS 的 `import` 名一致
+  - OpenHarmony 标准命名：`"libxxx.so"`
 
-## ## 说明
-本项目由 **CyberSoul** 协议驱动。我们通过跨版本移植与底层优化技术，成功实现了 本地大模型在系统组件中的深度集成。
+## 🔧 常见问题
+
+### Q: 运行时提示 "模块导入失败"
+**A:** 检查 hilog 日志：
+```bash
+hdc shell hilog | grep -iE 'llama|napi|dlopen|error'
+```
+常见原因：
+1. `.so` 文件 NEEDED 依赖带版本号（如 `libggml-cpu.so.0`），需用 patchelf 修复
+2. NAPI 模块 `nm_modname` 与 `oh-package.json5` 的 `name` 不匹配
+
+### Q: 编译报错 "Cannot find module 'llama_napi'"
+**A:** 检查以下配置是否一致：
+- `product/phone/oh-package.json5` 的 `dependencies` 名称
+- `src/main/cpp/types/libllama_napi/oh-package.json5` 的 `name` 字段
+- `aiAssistant.ets` 的 `import from "xxx"` 语句
+
+## 📝 说明
+本项目由 **CyberSoul** 协议驱动。我们通过跨版本移植与底层优化技术，成功实现了本地大模型在系统组件中的深度集成。

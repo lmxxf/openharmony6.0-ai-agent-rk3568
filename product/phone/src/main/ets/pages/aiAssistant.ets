@@ -7,7 +7,7 @@ import Router from '@system.router';
 import ConfigData from '../../../../../../common/utils/src/main/ets/default/baseUtil/ConfigData';
 import LogUtil from '../../../../../../common/utils/src/main/ets/default/baseUtil/LogUtil';
 import HeadComponent from '../../../../../../common/component/src/main/ets/default/headComponent';
-import llama from "llama_napi";
+import llama from "libllama_napi.so";
 
 interface ChatMessage {
   role: 'user' | 'assistant';
