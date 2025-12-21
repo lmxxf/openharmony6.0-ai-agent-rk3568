@@ -1,0 +1,6 @@
+{
+  "name": "libllama_napi.so",
+  "types": "./index.d.ts",
+  "version": "1.0.0",
+  "description": "llama.cpp NAPI binding for OpenHarmony"
+}

@@ -1504,12 +1504,10 @@
       "name": "vpn_change_alert_content",
       "value": "您已连接到VPN,如果您要连接到其他VPN,则系统替换现有VPN."
     },
-
     {
       "name": "vpn_change_alert_confirm",
       "value": "替换"
     },
-
     {
       "name": "vpn_connect_title",
       "value": "连接到%s"
@@ -1598,7 +1596,6 @@
       "name": "vpn_edit_ipsecidentifier",
       "value": "IPSec 标识符"
     },
-
     {
       "name": "vpn_edit_l2tpsecret",
       "value": "L2TP 密钥"
@@ -1703,7 +1700,6 @@
       "name": "vpn_line_disconnect_alert_confirm",
       "value": "断开"
     },
-
     {
       "name": "vpn_line_disconnect_operation_edit",
       "value": "编辑VPN网络"
@@ -1712,7 +1708,6 @@
       "name": "vpn_line_disconnect_operation_remove",
       "value": "删除VPN网络"
     },
-
     {
       "name": "vpn_state_connect_ing",
       "value": "连接中..."
@@ -1740,7 +1735,8 @@
     {
       "name": "vpn_list_add",
       "value": "添加VPN网络"
-    },    {
+    },
+    {
       "name": "ovpn_auth_type_cert",
       "value": "证书( TLS )"
     },
@@ -1863,6 +1859,10 @@
     {
       "name": "pair_cancel",
       "value": "取消"
+    },
+    {
+      "name": "ai_assistant",
+      "value": "AI 助手"
     }
   ]
 }

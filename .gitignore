@@ -4,3 +4,7 @@
 /.idea
 **/build
 /.hvigor
+*.log
+llama_cpp/
+napi/
+product/phone/libs/

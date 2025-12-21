@@ -5,5 +5,7 @@
   "description": "example description",
   "repository": {},
   "version": "1.0.0",
-  "dependencies": {}
+  "dependencies": {
+    "libllama_napi.so": "file:./src/main/cpp/types/libllama_napi"
+  }
 }

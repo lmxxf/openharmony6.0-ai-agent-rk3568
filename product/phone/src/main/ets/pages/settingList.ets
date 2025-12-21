@@ -225,6 +225,17 @@ struct EntryComponent {
           })
         })
 
+
+        ListItem() {
+          // aiAssistant
+          SettingItemComponent({
+            targetPage: "pages/aiAssistant",
+            settingTitle: $r("app.string.ai_assistant"),
+            settingEndText: $endTextEmpty,
+            settingIcon: "/res/image/ic_ai.svg",
+          })
+        }
+        .settingListItemFancy()
         ListItem() {
           List() {
             ListItem(){
