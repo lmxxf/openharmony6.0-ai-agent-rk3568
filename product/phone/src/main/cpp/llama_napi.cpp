@@ -216,6 +216,9 @@ static void GenerateExecute(napi_env env, void* data) {
         llama_memory_clear(mem, true);
     }
 
+    // Reset sampler state for new generation
+    llama_sampler_reset(g_sampler);
+
     // Create batch
     llama_batch batch = llama_batch_init(tokens.size(), 0, 1);
 
@@ -377,7 +380,7 @@ static napi_module llamaModule = {
     .nm_flags = 0,
     .nm_filename = nullptr,
     .nm_register_func = Init,
-    .nm_modname = "llama_napi",
+    .nm_modname = "libllama_napi.so",
     .nm_priv = nullptr,
     .reserved = {0},
 };

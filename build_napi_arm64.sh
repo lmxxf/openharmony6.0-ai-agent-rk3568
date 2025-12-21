@@ -27,9 +27,13 @@ for lib in libllama.so libggml.so libggml-base.so libggml-cpu.so; do
     patchelf --set-rpath '$ORIGIN' $lib
 done
 
+# 清除所有 .so.0 版本号依赖 (llama.cpp 编译产物默认带版本号)
 patchelf --replace-needed libggml.so.0 libggml.so libllama.so 2>/dev/null || true
 patchelf --replace-needed libggml-base.so.0 libggml-base.so libllama.so 2>/dev/null || true
 patchelf --replace-needed libggml-cpu.so.0 libggml-cpu.so libllama.so 2>/dev/null || true
+patchelf --replace-needed libggml-cpu.so.0 libggml-cpu.so libggml.so 2>/dev/null || true
+patchelf --replace-needed libggml-base.so.0 libggml-base.so libggml.so 2>/dev/null || true
+patchelf --replace-needed libggml-base.so.0 libggml-base.so libggml-cpu.so 2>/dev/null || true
 
 cd "$SCRIPT_DIR"
 "$OHOS_CLANG_ROOT/bin/clang++" \
