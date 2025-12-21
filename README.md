@@ -15,10 +15,10 @@
 
 ## 📊 性能参考
 
-| 芯片 | CPU 架构 | 推理速度 (0.5B Q4) |
-|------|---------|-------------------|
-| RK3568 | 4x A55 @2.0GHz | ~2 秒/token |
-| 展锐 P7885 | 4x A76 + 4x A55 | ~0.3-0.5 秒/token |
+| 芯片 | CPU 架构 | 推理速度 (Qwen2.5-0.5B Q4) |
+|------|---------|---------------------------|
+| RK3568 | 4x A55 @2.0GHz | ~0.5 tokens/s |
+| 展锐 P7885 | 4x A76 + 4x A55 | ~2-3 tokens/s |
 
 ## 🛠 前置要求
 
@@ -59,10 +59,16 @@ export PATH=$NODE_HOME/bin:$PATH
 # 安装应用
 hdc install product/phone/build/default/outputs/default/phone-default-signed.hap
 
-# 推送 Qwen2.5-0.5B 量化模型 (约 470MB)
+# 下载 Qwen2.5-0.5B 量化模型（约 470MB）
+wget https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf -O qwen2.5-0.5b-q4.gguf
+
+# 推送模型到设备
 # 注意：模型路径必须与代码中 MODEL_PATH 一致
-hdc file send qwen2.5-0.5b-instruct-q4_k_m.gguf /data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf
+hdc file send qwen2.5-0.5b-q4.gguf /data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf
 ```
+
+### 5. 使用 AI 助手
+打开设置应用 → 点击"AI 助手"入口 → 等待模型加载完成后即可对话
 
 ## 🔄 跨设备部署
 
@@ -109,3 +115,99 @@ hdc shell hilog | grep -iE 'llama|napi|dlopen|error'
 - `product/phone/oh-package.json5` 的 `dependencies` 名称
 - `src/main/cpp/types/libllama_napi/oh-package.json5` 的 `name` 字段
 - `aiAssistant.ets` 的 `import from "xxx"` 语句
+
+---
+
+## 🔨 从源码编译（完整流程）
+
+如果需要修改 llama.cpp 或 NAPI 封装，按以下步骤从源码编译。
+
+### 1. 下载 llama.cpp 源码
+```bash
+git clone --depth 1 https://github.com/ggerganov/llama.cpp.git llama_cpp
+```
+
+### 2. 编译 llama.cpp (ARM64)
+```bash
+cd llama_cpp
+# 使用项目提供的编译脚本（自动配置交叉编译）
+# 或参考 ohos_arm64.cmake 手动配置 CMake
+```
+
+### 3. 编译 NAPI 封装
+```bash
+./build_napi_arm64.sh
+```
+
+该脚本会自动完成：
+1. 复制 llama.cpp 编译产物到 `libs/arm64-v8a/`
+2. 用 patchelf 修复 SONAME、NEEDED、RUNPATH（去除 `.so.0` 版本号）
+3. 编译 `libllama_napi.so`
+
+**patchelf 修复原理**（供参考）：
+
+| 修改项 | 说明 | 举例 |
+|--------|------|------|
+| SONAME | .so 内部记录的"我叫什么" | `libllama.so.0` → `libllama.so` |
+| NEEDED | .so 内部记录的"我依赖谁" | 依赖 `libggml.so.0` → 依赖 `libggml.so` |
+| RUNPATH | .so 内部记录的"去哪找依赖" | 编译机路径 → `$ORIGIN`（同目录） |
+
+### 4. 编译 HAP
+```bash
+rm -rf product/phone/build .hvigor  # 清缓存
+./hvigorw assembleHap
+```
+
+---
+
+## 📁 目录结构
+```
+settings/
+├── llama_cpp/                    # llama.cpp 源码和编译配置
+│   └── build_arm64/              # ARM64 编译产物
+├── product/phone/
+│   ├── src/main/cpp/             # NAPI 封装
+│   │   ├── llama_napi.cpp        # NAPI 实现
+│   │   └── types/libllama_napi/  # 类型声明
+│   ├── src/main/ets/pages/
+│   │   ├── settingList.ets       # 主列表（含 AI 入口）
+│   │   └── aiAssistant.ets       # AI 聊天页面
+│   └── libs/arm64-v8a/           # 预编译的 .so 库
+├── build_napi_arm64.sh           # NAPI 编译脚本
+├── build_all_ai_arm64.sh         # 一键编译脚本
+├── 开发日志.md                    # 详细开发记录
+└── README.md                      # 本文件
+```
+
+---
+
+## 🧪 测试环境
+
+| 系统 | 设备 | 状态 |
+|------|------|------|
+| OpenHarmony 6.0 | RK3568 (ARM64) | ✅ 已验证 |
+| OpenHarmony 6.0 | 展锐 P7885 (ARM64) | 🔜 待验证 |
+
+---
+
+## 📝 关于 NPU
+
+当前实现仅使用 CPU（NEON 指令集）。
+
+**为什么不用 NPU？**
+
+| 芯片 | NPU 算力 | 能跑 LLM 吗 | 原因 |
+|------|---------|------------|------|
+| P7885 | 8 TOPS | ❌ 不能 | 算子库偏 CNN（卷积、池化），缺少 Transformer 核心算子（GeMM、RoPE、KV Cache、Paged Attention） |
+| RK3568 | 1 TOPS | ❌ 不能 | RKNN-Toolkit 同样只支持传统神经网络 |
+
+**展锐 P7885 NPU 详情**（来自 Kallen 调研）：
+- 6nm 工艺，8 TOPS，支持 INT8/INT4/FP16
+- 典型场景：人脸识别、图像超分、目标检测、视频增强 —— 都是 CNN 类任务
+- **无公开算子列表**，SDK 只给 NDA 合作伙伴
+- 即使有 SDK，动态序列的 LLM 推理会因内存带宽限制直接卡死
+
+**端侧 LLM 加速门槛**：至少 40+ TOPS 且支持 Transformer 算子（如高通 Hexagon、Snapdragon X Elite 45 TOPS）。8 TOPS 的 CNN NPU 跑 LLM 就像拿计算器跑 Stable Diffusion。
+
+## License
+Apache License 2.0
