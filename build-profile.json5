@@ -1,0 +1,101 @@
+{
+  "app": {
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "release",
+        "compileSdkVersion": 20,
+        "compatibleSdkVersion": 20,
+        "targetSdkVersion": 20,
+        "runtimeOS": "OpenHarmony"
+      }
+    ],
+    "signingConfigs": [
+      {
+        "name": "release",
+        "material": {
+          "storePassword": "00000016898B7E4E76E6E7089591AB3ECEC5C68F194BBD0C6E6C17446516E8FBDA0E8657F0A8",
+          "certpath": "signature/OpenHarmonyApplication.cer",
+          "keyAlias": "OpenHarmony Application Release",
+          "keyPassword": "0000001607C1E3DE9D968380A780032F24E0099F93A67F346F8C51189010440B5BF58E8E0147",
+          "profile": "signature/settings.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "signature/OpenHarmony.p12"
+        }
+      }
+        ]  },
+  "modules": [
+    {
+      "name": "phone",
+      "srcPath": "./product/phone",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    //    {
+    //      "name": "wearable",
+    //      "srcPath": "./product/wearable",
+    //      "targets": [
+    //        {
+    //          "name": "default",
+    //          "applyToProducts": [
+    //            "default"
+    //          ]
+    //        }
+    //      ]
+    //    },
+    {
+      "name": "component",
+      "srcPath": "./common/component",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "srcPath": "./common/search",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "settingsBase",
+      "srcPath": "./common/settingsBase",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "utils",
+      "srcPath": "./common/utils",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

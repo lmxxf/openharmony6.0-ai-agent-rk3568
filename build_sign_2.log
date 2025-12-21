@@ -1,0 +1,17 @@
+> hvigor [32mUP-TO-DATE :phone:default@PreBuild...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@GenerateMetadata...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@GenerateLoaderJson...  [39m
+> hvigor [32mFinished :phone:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :phone:default@MakePackInfo...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@ProcessProfile...  [39m
+> hvigor [32mFinished :phone:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :phone:default@ProcessResource...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@ProcessLibs...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@CompileResource...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@CompileArkTS...  [39m
+> hvigor [32mFinished :phone:default@BuildJS... after 4 ms [39m
+> hvigor [32mUP-TO-DATE :phone:default@PackageHap...  [39m
+> hvigor [32mFinished :phone:default@SignHap... after 1 s 636 ms [39m
+> hvigor [32mFinished :phone:assembleHap... after 1 ms [39m
+> hvigor [32mBUILD SUCCESSFUL in 1 s 818 ms [39m

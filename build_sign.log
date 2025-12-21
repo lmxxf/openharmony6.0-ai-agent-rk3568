@@ -1,0 +1,21 @@
+> hvigor [32mStarting Hvigor Daemon...[39m
+> hvigor [32mHvigor Daemon started in 370 ms[39m
+> hvigor [32mUP-TO-DATE :phone:default@PreBuild...  [39m
+> hvigor [32mFinished :phone:default@GenerateMetadata... after 10 ms [39m
+> hvigor [32mUP-TO-DATE :phone:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@GenerateLoaderJson...  [39m
+> hvigor [32mFinished :phone:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :phone:default@MakePackInfo...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@ProcessProfile...  [39m
+> hvigor [32mFinished :phone:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :phone:default@ProcessResource...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@ProcessLibs...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@CompileResource...  [39m
+> hvigor [32mUP-TO-DATE :phone:default@CompileArkTS...  [39m
+> hvigor [32mFinished :phone:default@BuildJS... after 4 ms [39m
+> hvigor [32mUP-TO-DATE :phone:default@PackageHap...  [39m
+> hvigor [91mERROR: Failed :phone:default@SignHap... [39m
+> hvigor [91mERROR: ENOENT: no such file or directory, stat '/home/lmxxf/oh6/source/applications/standard/settings/signature/material'
+	 Detail: Signing failed. Reconfigure the signature or clear the /home/lmxxf/oh6/source/applications/standard/settings/signature folder and perform signing again.
+	 at /home/lmxxf/oh6/source/applications/standard/settings/build-profile.json5[39m
+> hvigor [91mERROR: BUILD FAILED in 1 s 15 ms [39m
