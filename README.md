@@ -1,6 +1,6 @@
 # OpenHarmony 6.0 Settings + Local AI Agent (ARM64)
 
-基于 OpenHarmony 6.0 源码树构建的系统设置应用，深度集成了本地 AI 助手功能（llama.cpp + Qwen2.5）。
+基于 OpenHarmony 6.0 源码树构建的系统设置应用，深度集成了本地 AI 助手功能（llama.cpp + Qwen3）。
 
 本项目是 **OpenHarmony 系统原生 Settings 应用** 的增强版。通过在系统设置中注入 AI 能力，实现完全本地化、隐私安全的端侧大模型推理。
 
@@ -15,7 +15,7 @@
 
 ## 📊 性能参考
 
-| 芯片 | CPU 架构 | 推理速度 (Qwen2.5-0.5B Q4) |
+| 芯片 | CPU 架构 | 推理速度 (Qwen3-0.6B Q4) |
 |------|---------|---------------------------|
 | RK3568 | 4x A55 @2.0GHz | ~0.5 tokens/s |
 | 展锐 P7885 | 4x A76 + 4x A55 | ~2-3 tokens/s |
@@ -59,12 +59,16 @@ export PATH=$NODE_HOME/bin:$PATH
 # 安装应用
 hdc install product/phone/build/default/outputs/default/phone-default-signed.hap
 
-# 下载 Qwen2.5-0.5B 量化模型（约 470MB）
-wget https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf -O qwen2.5-0.5b-q4.gguf
+# 下载 Qwen3-0.6B 量化模型（约 382MB）
+# 推荐从 ModelScope 下载（国内更快）
+# https://modelscope.cn/models/unsloth/Qwen3-0.6B-GGUF
+# 选择 IQ4_NL (381MB) 或 Q4_0 (382MB)
 
 # 推送模型到设备
-# 注意：模型路径必须与代码中 MODEL_PATH 一致
-hdc file send qwen2.5-0.5b-q4.gguf /data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf
+# 注意：需要先创建目录并修改权限
+hdc shell mkdir -p /data/app/el2/100/base/com.ohos.settings/files/
+hdc file send Qwen3-0.6B-IQ4_NL.gguf /data/app/el2/100/base/com.ohos.settings/files/qwen3-0.6b-q4.gguf
+hdc shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos.settings/files/qwen3-0.6b-q4.gguf
 ```
 
 ### 5. 使用 AI 助手
@@ -82,7 +86,8 @@ hdc list targets
 hdc -t <device_id> install product/phone/build/default/outputs/default/phone-default-signed.hap
 
 # 推送模型文件
-hdc -t <device_id> file send qwen2.5-0.5b-instruct-q4_k_m.gguf /data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf
+hdc -t <device_id> file send Qwen3-0.6B-IQ4_NL.gguf /data/app/el2/100/base/com.ohos.settings/files/qwen3-0.6b-q4.gguf
+hdc -t <device_id> shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos.settings/files/qwen3-0.6b-q4.gguf
 ```
 
 **注意**：不同设备的推理速度取决于 CPU 性能，P7885 (A76 大核) 比 RK3568 (A55) 快约 4-6 倍。

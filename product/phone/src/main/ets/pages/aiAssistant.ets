@@ -16,7 +16,7 @@ interface ChatMessage {
 }
 
 // 模型路径配置
-const MODEL_PATH = '/data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf';
+const MODEL_PATH = '/data/storage/el2/base/files/qwen3-0.6b-q4.gguf';
 const N_THREADS = 8;
 
 @Entry
@@ -51,7 +51,7 @@ struct AiAssistant {
     try {
       const success: boolean = llama.loadModel(MODEL_PATH, N_THREADS);
       if (success) {
-        this.modelStatus = 'Qwen2.5-0.5B 已加载';
+        this.modelStatus = 'Qwen3-0.6B 已加载';
         this.modelLoaded = true;
         LogUtil.info('Model loaded successfully');
       } else {
@@ -111,7 +111,7 @@ struct AiAssistant {
                 .fontSize(24)
                 .fontWeight(FontWeight.Bold)
                 .margin({ top: 16 })
-              Text('基于 Qwen2.5-0.5B 本地模型')
+              Text('基于 Qwen3-0.6B 本地模型')
                 .fontSize(14)
                 .fontColor('#999999')
                 .margin({ top: 8 })
@@ -274,9 +274,9 @@ struct AiAssistant {
     });
   }
 
-  // 格式化 prompt 为 Qwen 对话格式
+  // 格式化 prompt 为 Qwen3 对话格式
   formatPrompt(userInput: string): string {
-    // Qwen2.5 chat template
+    // Qwen3 chat template (ChatML格式，与Qwen2.5兼容)
     let prompt = '<|im_start|>system\n你是一个运行在OpenHarmony设备上的本地AI助手。请简洁回答用户问题。<|im_end|>\n';
 
     // 添加历史对话（最多保留最近 3 轮）
