@@ -167,21 +167,63 @@ hdc shell hilog | grep -iE 'llama|napi|dlopen|error'
 
 如果需要修改 llama.cpp 或 NAPI 封装，按以下步骤从源码编译。
 
+### 0. OpenHarmony 源码树路径约定
+
+本项目假设你有完整的 OpenHarmony 6.0 源码树，以下是关键路径（相对于源码根目录）：
+
+| 组件 | 相对路径 |
+|------|----------|
+| **OpenHarmony SDK** | `out/sdk/packages/ohos-sdk/linux/20/` 或 `prebuilts/ohos-sdk/linux/` |
+| **Clang 工具链** | `prebuilts/clang/ohos/linux-x86_64/llvm/` |
+| **Node.js 18** | `prebuilts/build-tools/common/nodejs/node-v18.20.1-linux-x64/` |
+| **本项目位置** | `applications/standard/openharmony6.0-ai-agent-rk3568/` |
+
+**编译前设置 Node.js（系统 Node 22+ 与 hvigor 不兼容）：**
+```bash
+export PATH=/path/to/oh6/source/prebuilts/build-tools/common/nodejs/node-v18.20.1-linux-x64/bin:$PATH
+```
+
+**创建 local.properties（指定 SDK 路径）：**
+```bash
+echo "sdk.dir=/path/to/oh6/source/out/sdk/packages/ohos-sdk/linux" > local.properties
+```
+
 ### 1. 下载 llama.cpp 源码
 ```bash
-git clone --depth 1 https://github.com/ggerganov/llama.cpp.git llama_cpp
+git clone --depth 1 https://github.com/ggerganov/llama.cpp.git llama_cpp_src
 ```
 
 ### 2. 编译 llama.cpp (ARM64)
 ```bash
-cd llama_cpp
+cd llama_cpp_src
 # 使用项目提供的编译脚本（自动配置交叉编译）
 # 或参考 ohos_arm64.cmake 手动配置 CMake
 ```
 
 ### 3. 编译 NAPI 封装
+
+**方式一：使用脚本**
 ```bash
 ./build_napi_arm64.sh
+```
+
+**方式二：手动编译（需要 llama.cpp 头文件）**
+```bash
+SDK_BASE="/path/to/oh6/source/prebuilts/ohos-sdk/linux"
+OHOS_SDK_ROOT="$SDK_BASE/20"
+OHOS_CLANG_ROOT="/path/to/oh6/source/prebuilts/clang/ohos/linux-x86_64/llvm"
+SYSROOT="$OHOS_SDK_ROOT/native/sysroot"
+TARGET="aarch64-linux-ohos"
+LIBS_DIR="product/phone/libs/arm64-v8a"
+
+"$OHOS_CLANG_ROOT/bin/clang++" \
+    --target=$TARGET --sysroot="$SYSROOT" -fPIC -shared -std=c++17 -O2 \
+    -I"llama_cpp_src/include" -I"llama_cpp_src/ggml/include" \
+    -I"$SYSROOT/usr/include" -I"$SYSROOT/usr/include/napi" \
+    -L"$LIBS_DIR" -L"$SYSROOT/usr/lib/$TARGET" \
+    -lllama -lggml -lggml-base -lggml-cpu -lace_napi.z -lhilog_ndk.z \
+    -Wl,-rpath,'$ORIGIN' -o "$LIBS_DIR/libllama_napi.so" \
+    product/phone/src/main/cpp/llama_napi.cpp
 ```
 
 该脚本会自动完成：
@@ -231,7 +273,7 @@ settings/
 | 系统 | 设备 | 状态 |
 |------|------|------|
 | OpenHarmony 6.0 | RK3568 (ARM64) | ✅ 已验证 |
-| OpenHarmony 6.0 | 展锐 P7885 (ARM64) | 🔜 待验证 |
+| OpenHarmony 6.0 | 展锐 P7885 (ARM64) | ✅ 已验证 |
 
 ---
 
