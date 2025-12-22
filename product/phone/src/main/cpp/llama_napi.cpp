@@ -180,6 +180,17 @@ struct GenerateAsyncContext {
     bool success;
 };
 
+// Stream generate context - uses ThreadSafeFunction for callbacks
+struct StreamGenerateContext {
+    napi_async_work work;
+    napi_threadsafe_function tsfn;
+    napi_deferred deferred;
+    std::string prompt;
+    int maxTokens;
+    bool success;
+    std::string errorMsg;
+};
+
 // Worker thread function - does the actual generation
 static void GenerateExecute(napi_env env, void* data) {
     GenerateAsyncContext* ctx = static_cast<GenerateAsyncContext*>(data);
@@ -354,6 +365,223 @@ static napi_value StopGeneration(napi_env env, napi_callback_info info) {
     return undefined;
 }
 
+// Data passed to ThreadSafeFunction callback
+struct TokenCallbackData {
+    std::string token;
+    bool isDone;
+    bool isError;
+};
+
+// Called on JS thread to invoke the callback
+static void StreamCallJS(napi_env env, napi_value js_callback, void* context, void* data) {
+    TokenCallbackData* cbData = static_cast<TokenCallbackData*>(data);
+    if (!cbData) return;
+
+    napi_value argv[2];
+    napi_create_string_utf8(env, cbData->token.c_str(), cbData->token.length(), &argv[0]);
+    napi_get_boolean(env, cbData->isDone, &argv[1]);
+
+    napi_value undefined;
+    napi_get_undefined(env, &undefined);
+    napi_call_function(env, undefined, js_callback, 2, argv, nullptr);
+
+    delete cbData;
+}
+
+// Worker thread function for streaming generation
+static void StreamGenerateExecute(napi_env env, void* data) {
+    StreamGenerateContext* ctx = static_cast<StreamGenerateContext*>(data);
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (!g_model || !g_ctx || !g_sampler) {
+        ctx->errorMsg = "[Error: Model not loaded]";
+        ctx->success = false;
+        return;
+    }
+
+    LOGI("Stream generating with prompt length: %{public}zu, max tokens: %{public}d",
+         ctx->prompt.length(), ctx->maxTokens);
+
+    // Tokenize prompt
+    const llama_vocab* vocab = llama_model_get_vocab(g_model);
+    std::vector<llama_token> tokens(ctx->prompt.length() + 32);
+    int n_tokens = llama_tokenize(vocab, ctx->prompt.c_str(), ctx->prompt.length(),
+                                   tokens.data(), tokens.size(), true, true);
+
+    if (n_tokens < 0) {
+        tokens.resize(-n_tokens);
+        n_tokens = llama_tokenize(vocab, ctx->prompt.c_str(), ctx->prompt.length(),
+                                   tokens.data(), tokens.size(), true, true);
+    }
+    tokens.resize(n_tokens);
+
+    LOGI("Tokenized to %{public}d tokens", n_tokens);
+
+    // Clear KV cache
+    llama_memory_t mem = llama_get_memory(g_ctx);
+    if (mem) {
+        llama_memory_clear(mem, true);
+    }
+
+    // Reset sampler state
+    llama_sampler_reset(g_sampler);
+
+    // Create batch
+    llama_batch batch = llama_batch_init(tokens.size(), 0, 1);
+
+    for (int i = 0; i < n_tokens; i++) {
+        batch.token[i] = tokens[i];
+        batch.pos[i] = i;
+        batch.n_seq_id[i] = 1;
+        batch.seq_id[i][0] = 0;
+        batch.logits[i] = (i == n_tokens - 1);
+    }
+    batch.n_tokens = n_tokens;
+
+    // Decode prompt
+    if (llama_decode(g_ctx, batch) != 0) {
+        llama_batch_free(batch);
+        ctx->errorMsg = "[Error: decode failed]";
+        ctx->success = false;
+        return;
+    }
+
+    // Generate tokens with streaming
+    g_generating = true;
+    int generated = 0;
+
+    for (int i = 0; i < ctx->maxTokens && g_generating; i++) {
+        llama_token new_token = llama_sampler_sample(g_sampler, g_ctx, -1);
+
+        // Check for EOS
+        if (llama_vocab_is_eog(vocab, new_token)) {
+            break;
+        }
+
+        // Convert token to text
+        char buf[256];
+        int len = llama_token_to_piece(vocab, new_token, buf, sizeof(buf), 0, true);
+        if (len > 0) {
+            // Send token to JS callback
+            TokenCallbackData* cbData = new TokenCallbackData();
+            cbData->token = std::string(buf, len);
+            cbData->isDone = false;
+            cbData->isError = false;
+            napi_call_threadsafe_function(ctx->tsfn, cbData, napi_tsfn_blocking);
+            generated++;
+        }
+
+        // Prepare next batch
+        batch.n_tokens = 1;
+        batch.token[0] = new_token;
+        batch.pos[0] = n_tokens + i;
+        batch.n_seq_id[0] = 1;
+        batch.seq_id[0][0] = 0;
+        batch.logits[0] = true;
+
+        if (llama_decode(g_ctx, batch) != 0) {
+            LOGE("Failed to decode token %{public}d", i);
+            break;
+        }
+    }
+
+    g_generating = false;
+    llama_batch_free(batch);
+
+    // Send done signal
+    TokenCallbackData* doneData = new TokenCallbackData();
+    doneData->token = "";
+    doneData->isDone = true;
+    doneData->isError = false;
+    napi_call_threadsafe_function(ctx->tsfn, doneData, napi_tsfn_blocking);
+
+    LOGI("Stream generated %{public}d tokens", generated);
+    ctx->success = true;
+}
+
+// Complete callback for stream generation
+static void StreamGenerateComplete(napi_env env, napi_status status, void* data) {
+    StreamGenerateContext* ctx = static_cast<StreamGenerateContext*>(data);
+
+    // Release ThreadSafeFunction
+    napi_release_threadsafe_function(ctx->tsfn, napi_tsfn_release);
+
+    napi_value result;
+    if (ctx->success) {
+        napi_get_boolean(env, true, &result);
+        napi_resolve_deferred(env, ctx->deferred, result);
+    } else {
+        napi_create_string_utf8(env, ctx->errorMsg.c_str(), ctx->errorMsg.length(), &result);
+        napi_reject_deferred(env, ctx->deferred, result);
+    }
+
+    napi_delete_async_work(env, ctx->work);
+    delete ctx;
+}
+
+/**
+ * generateStream(prompt: string, maxTokens: number, callback: (token: string, done: boolean) => void): Promise<boolean>
+ *
+ * Streaming generation - calls callback for each token
+ */
+static napi_value GenerateStream(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    if (argc < 3) {
+        napi_value promise;
+        napi_deferred deferred;
+        napi_create_promise(env, &deferred, &promise);
+        napi_value error;
+        napi_create_string_utf8(env, "[Error: requires prompt, maxTokens, callback]", NAPI_AUTO_LENGTH, &error);
+        napi_reject_deferred(env, deferred, error);
+        return promise;
+    }
+
+    // Create context
+    StreamGenerateContext* ctx = new StreamGenerateContext();
+    ctx->prompt = GetStringArg(env, args[0]);
+    napi_get_value_int32(env, args[1], &ctx->maxTokens);
+    ctx->success = false;
+
+    // Create promise
+    napi_value promise;
+    napi_create_promise(env, &ctx->deferred, &promise);
+
+    // Create ThreadSafeFunction
+    napi_value resourceName;
+    napi_create_string_utf8(env, "llama_stream_callback", NAPI_AUTO_LENGTH, &resourceName);
+
+    napi_create_threadsafe_function(
+        env,
+        args[2],          // JS callback function
+        nullptr,          // async_resource
+        resourceName,     // async_resource_name
+        0,                // max_queue_size (0 = unlimited)
+        1,                // initial_thread_count
+        nullptr,          // thread_finalize_data
+        nullptr,          // thread_finalize_cb
+        nullptr,          // context
+        StreamCallJS,     // call_js_cb
+        &ctx->tsfn
+    );
+
+    // Create async work
+    napi_value workName;
+    napi_create_string_utf8(env, "llama_stream_generate", NAPI_AUTO_LENGTH, &workName);
+
+    napi_create_async_work(env, nullptr, workName,
+                           StreamGenerateExecute, StreamGenerateComplete,
+                           ctx, &ctx->work);
+
+    napi_queue_async_work(env, ctx->work);
+
+    LOGI("Stream generate async work queued");
+    return promise;
+}
+
 // Module initialization
 static napi_value Init(napi_env env, napi_value exports) {
     LOGI("LlamaNAPI: Native module Init calling...");
@@ -365,6 +593,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"unloadModel", nullptr, UnloadModel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"isModelLoaded", nullptr, IsModelLoaded, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"generate", nullptr, Generate, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"generateStream", nullptr, GenerateStream, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stopGeneration", nullptr, StopGeneration, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
 

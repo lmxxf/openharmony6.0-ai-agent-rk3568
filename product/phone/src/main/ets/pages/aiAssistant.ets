@@ -276,6 +276,15 @@ struct AiAssistant {
     this.inputText = '';
     this.isLoading = true;
 
+    // 先添加一个空的助手消息，后续流式填充
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now()
+    };
+    this.messages.push(assistantMessage);
+    const msgIndex = this.messages.length - 1;
+
     // 滚动到底部
     setTimeout(() => {
       this.scroller.scrollEdge(Edge.Bottom);
@@ -284,27 +293,34 @@ struct AiAssistant {
     // 构造对话格式的 prompt
     const formattedPrompt: string = this.formatPrompt(prompt);
 
-    // 异步调用 llama.cpp 推理
-    const generatePromise: Promise<string> = llama.generate(formattedPrompt, 64);
-    generatePromise.then((response: string) => {
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: response,
-        timestamp: Date.now()
-      };
-      this.messages.push(assistantMessage);
-      this.isLoading = false;
-
-      setTimeout(() => {
+    // 流式回调：每收到一个 token 就更新 UI
+    const streamCallback = (token: string, done: boolean) => {
+      if (!done) {
+        // 追加 token 到消息
+        this.messages[msgIndex] = {
+          role: 'assistant',
+          content: this.messages[msgIndex].content + token,
+          timestamp: this.messages[msgIndex].timestamp
+        };
+        // 滚动到底部
         this.scroller.scrollEdge(Edge.Bottom);
-      }, 100);
-    }).catch((error: Error) => {
-      const errorMessage: ChatMessage = {
+      } else {
+        // 生成完成
+        this.isLoading = false;
+        setTimeout(() => {
+          this.scroller.scrollEdge(Edge.Bottom);
+        }, 100);
+      }
+    };
+
+    // 使用流式接口
+    const streamPromise: Promise<boolean> = llama.generateStream(formattedPrompt, 128, streamCallback);
+    streamPromise.catch((error: Error) => {
+      this.messages[msgIndex] = {
         role: 'assistant',
         content: '推理出错: ' + JSON.stringify(error),
         timestamp: Date.now()
       };
-      this.messages.push(errorMessage);
       LogUtil.error('Generate error: ' + JSON.stringify(error));
       this.isLoading = false;
 
