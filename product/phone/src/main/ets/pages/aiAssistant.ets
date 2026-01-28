@@ -9,6 +9,10 @@ import LogUtil from '../../../../../../common/utils/src/main/ets/default/baseUti
 import HeadComponent from '../../../../../../common/component/src/main/ets/default/headComponent';
 import llama from "libllama_napi.so";
 import http from '@ohos.net.http';
+import util from '@ohos.util';
+import bluetoothModel from '../model/bluetoothImpl/BluetoothModel';
+import dateAndTimeModel from '../model/dateAndTimeImpl/DateAndTimeModel';
+import { BrightnessSettingModel } from '../model/displayAndBrightnessImpl/brightness/BrightnessSettingModel';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -29,6 +33,38 @@ interface ApiRequestBody {
   stream: boolean;
   max_tokens: number;
 }
+
+// UI-Agent（Settings 内部 demo）动作协议：仅允许白名单
+interface UiAgentNavigateStep {
+  type: 'navigate';
+  page: string;
+}
+
+interface UiAgentSetBluetoothStep {
+  type: 'setBluetooth';
+  on: boolean;
+}
+
+interface UiAgentToggleBluetoothStep {
+  type: 'toggleBluetooth';
+}
+
+interface UiAgentSetBrightnessPercentStep {
+  type: 'setBrightnessPercent';
+  percent: number; // 0-100
+}
+
+interface UiAgentSetTimeFormatStep {
+  type: 'setTimeFormat';
+  format: '12h' | '24h';
+}
+
+type UiAgentStep =
+  UiAgentNavigateStep
+  | UiAgentSetBluetoothStep
+  | UiAgentToggleBluetoothStep
+  | UiAgentSetBrightnessPercentStep
+  | UiAgentSetTimeFormatStep;
 
 // 模型配置
 interface ModelConfig {
@@ -76,6 +112,9 @@ struct AiAssistant {
   @State inferenceMode: InferenceMode = 'cloud'; // 默认云端，因为本地太慢
   @State showModePicker: boolean = false;
   private scroller: Scroller = new Scroller();
+  private deepSeekSseBuffer: string = '';
+  private deepSeekDecoder: util.TextDecoder = new util.TextDecoder();
+  private brightnessModel: BrightnessSettingModel = new BrightnessSettingModel();
 
   aboutToAppear() {
     LogUtil.info('AiAssistant aboutToAppear');
@@ -95,13 +134,7 @@ struct AiAssistant {
       const context = getContext(this);
       const resourceManager = context.resourceManager;
       const configData = await resourceManager.getRawFileContent('api_config.json');
-
-      // Uint8Array 转字符串
-      let configStr = '';
-      for (let i = 0; i < configData.length; i++) {
-        configStr += String.fromCharCode(configData[i]);
-      }
-
+      const configStr = this.decodeUtf8(configData);
       const config = JSON.parse(configStr) as Record<string, string>;
       if (config['deepseek_api_key']) {
         DEEPSEEK_API_KEY = config['deepseek_api_key'];
@@ -420,16 +453,188 @@ struct AiAssistant {
     }, 100);
 
     if (this.inferenceMode === 'cloud') {
-      // 云端 DeepSeek API
-      this.sendToDeepSeek(msgIndex);
+      // Demo: UI-Agent（仅限设置应用内：蓝牙/亮度/日期时间）
+      const handled = this.tryExecuteUiAgent(prompt, msgIndex);
+      if (!handled) {
+        // 云端 DeepSeek API
+        this.sendToDeepSeek(msgIndex);
+      }
     } else {
       // 本地推理
       this.sendToLocal(prompt, msgIndex);
     }
   }
 
+  private tryExecuteUiAgent(userText: string, msgIndex: number): boolean {
+    const plan = this.buildUiAgentPlan(userText);
+    if (!plan || plan.length === 0) {
+      return false;
+    }
+    try {
+      const resultText = this.executeUiAgentPlan(plan);
+      this.messages[msgIndex] = {
+        role: 'assistant',
+        content: resultText,
+        timestamp: this.messages[msgIndex].timestamp
+      };
+    } catch (e) {
+      this.messages[msgIndex] = {
+        role: 'assistant',
+        content: '执行失败: ' + JSON.stringify(e),
+        timestamp: this.messages[msgIndex].timestamp
+      };
+    } finally {
+      this.isLoading = false;
+      setTimeout((): void => {
+        this.scroller.scrollEdge(Edge.Bottom);
+      }, 100);
+    }
+    return true;
+  }
+
+  private buildUiAgentPlan(userText: string): UiAgentStep[] | null {
+    const text = userText.trim();
+    if (text.length === 0) return null;
+    const lower = text.toLowerCase();
+
+    const plan: UiAgentStep[] = [];
+
+    // 蓝牙
+    if (text.includes('蓝牙') || lower.includes('bluetooth')) {
+      // “蓝牙开关/切换蓝牙” 默认执行 toggle
+      if (text.includes('开关') || text.includes('切换') || lower.includes('toggle')) {
+        plan.push({ type: 'toggleBluetooth' } as UiAgentToggleBluetoothStep);
+        plan.push({ type: 'navigate', page: 'pages/bluetooth' } as UiAgentNavigateStep);
+        return plan;
+      }
+
+      const wantOnCn = text.includes('打开') || text.includes('开启') || text.includes('开');
+      const wantOffCn = text.includes('关闭') || text.includes('关掉') || text.includes('关');
+      const wantOnEn = /\b(on|enable|enabled)\b/.test(lower) || lower.includes('turn on') || lower.includes('switch on');
+      const wantOffEn = /\b(off|disable|disabled)\b/.test(lower) || lower.includes('turn off') || lower.includes('switch off');
+
+      if (wantOnCn || wantOnEn) {
+        plan.push({ type: 'setBluetooth', on: true } as UiAgentSetBluetoothStep);
+      } else if (wantOffCn || wantOffEn) {
+        plan.push({ type: 'setBluetooth', on: false } as UiAgentSetBluetoothStep);
+      } else {
+        // 只提“蓝牙”则仅导航
+        plan.push({ type: 'navigate', page: 'pages/bluetooth' } as UiAgentNavigateStep);
+        return plan;
+      }
+      plan.push({ type: 'navigate', page: 'pages/bluetooth' } as UiAgentNavigateStep);
+      return plan;
+    }
+
+    // 亮度（支持“亮度50% / 调到 30 / 设置为 80”）
+    if (text.includes('亮度') || text.toLowerCase().includes('brightness')) {
+      const percentMatch = text.match(/(\d{1,3})\s*%/);
+      const numberMatch = text.match(/(\d{1,3})/);
+      let percent: number | null = null;
+      if (percentMatch && percentMatch[1]) {
+        percent = Number(percentMatch[1]);
+      } else if (numberMatch && numberMatch[1]) {
+        percent = Number(numberMatch[1]);
+      }
+      if (percent !== null && !Number.isNaN(percent)) {
+        percent = Math.max(0, Math.min(100, percent));
+        plan.push({ type: 'setBrightnessPercent', percent } as UiAgentSetBrightnessPercentStep);
+      }
+      plan.push({ type: 'navigate', page: 'pages/screenAndBrightness' } as UiAgentNavigateStep);
+      return plan;
+    }
+
+    // 日期时间 / 24小时制 / 12小时制
+    if (text.includes('日期') || text.includes('时间') || text.toLowerCase().includes('date') || text.toLowerCase().includes('time')) {
+      if (text.includes('24') || text.toLowerCase().includes('24h')) {
+        plan.push({ type: 'setTimeFormat', format: '24h' } as UiAgentSetTimeFormatStep);
+      } else if (text.includes('12') || text.toLowerCase().includes('12h')) {
+        plan.push({ type: 'setTimeFormat', format: '12h' } as UiAgentSetTimeFormatStep);
+      }
+      plan.push({ type: 'navigate', page: 'pages/dateAndTime' } as UiAgentNavigateStep);
+      return plan;
+    }
+
+    return null;
+  }
+
+  private executeUiAgentPlan(plan: UiAgentStep[]): string {
+    const done: string[] = [];
+    for (const step of plan) {
+      if (step.type === 'navigate') {
+        Router.push({ uri: step.page });
+        done.push('已打开页面: ' + step.page);
+        continue;
+      }
+      if (step.type === 'setBluetooth') {
+        try {
+          if (step.on) {
+            bluetoothModel.enableBluetooth();
+            done.push('已开启蓝牙');
+          } else {
+            bluetoothModel.disableBluetooth();
+            done.push('已关闭蓝牙');
+          }
+        } catch (e) {
+          done.push('蓝牙操作失败');
+        }
+        continue;
+      }
+      if (step.type === 'toggleBluetooth') {
+        try {
+          const state = bluetoothModel.getState();
+          const isOn = (state === 2);
+          if (isOn) {
+            bluetoothModel.disableBluetooth();
+            done.push('已关闭蓝牙');
+          } else {
+            bluetoothModel.enableBluetooth();
+            done.push('已开启蓝牙');
+          }
+        } catch (e) {
+          done.push('蓝牙操作失败');
+        }
+        continue;
+      }
+      if (step.type === 'setBrightnessPercent') {
+        const percent = step.percent;
+        const min = this.brightnessModel.getMinBrightness();
+        const max = this.brightnessModel.getMaxBrightness();
+        const value = Math.round(min + (max - min) * (percent / 100.0));
+        this.brightnessModel.setValue(value, 0);
+        done.push(`已设置亮度: ${percent}%`);
+        continue;
+      }
+      if (step.type === 'setTimeFormat') {
+        if (step.format === '24h') {
+          dateAndTimeModel.setTimeFormatAs24H();
+          done.push('已切换为 24 小时制');
+        } else if (step.format === '12h') {
+          dateAndTimeModel.setTimeFormatAs12H();
+          done.push('已切换为 12 小时制');
+        }
+        continue;
+      }
+    }
+    return done.length > 0 ? done.join('\n') : '未执行任何动作';
+  }
+
   // 云端 DeepSeek 推理
   async sendToDeepSeek(msgIndex: number) {
+    if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY.trim().length === 0) {
+      this.messages[msgIndex] = {
+        role: 'assistant',
+        content: 'DeepSeek API Key 未配置（请在 rawfile/api_config.json 填写 deepseek_api_key）',
+        timestamp: Date.now()
+      };
+      this.isLoading = false;
+      return;
+    }
+
+    this.deepSeekSseBuffer = '';
+    // reset streaming decoder state
+    this.deepSeekDecoder = new util.TextDecoder();
+
     // 构造消息历史
     const apiMessages: ApiMessage[] = [
       { role: 'system', content: '你是一个运行在OpenHarmony设备上的AI助手。请简洁回答用户问题。' } as ApiMessage
@@ -457,37 +662,9 @@ struct AiAssistant {
 
       // 流式请求
       httpRequest.on('dataReceive', (data: ArrayBuffer) => {
-        const text = this.arrayBufferToString(data);
-        LogUtil.info('DeepSeek chunk: ' + text);
-
-        // 解析 SSE 格式
-        const lines = text.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === '[DONE]') {
-              continue;
-            }
-            try {
-              const chunk = JSON.parse(jsonStr) as Record<string, Object>;
-              const choices = chunk['choices'] as Array<Record<string, Object>>;
-              if (choices && choices.length > 0) {
-                const delta = choices[0]['delta'] as Record<string, string>;
-                if (delta && delta['content']) {
-                  // 追加内容
-                  this.messages[msgIndex] = {
-                    role: 'assistant',
-                    content: this.messages[msgIndex].content + delta['content'],
-                    timestamp: this.messages[msgIndex].timestamp
-                  };
-                  this.scroller.scrollEdge(Edge.Bottom);
-                }
-              }
-            } catch (e) {
-              // 忽略解析错误（可能是不完整的 JSON）
-            }
-          }
-        }
+        const chunkText = this.decodeUtf8WithStream(new Uint8Array(data));
+        this.deepSeekSseBuffer += chunkText;
+        this.consumeDeepSeekSseBuffer(msgIndex);
       });
 
       httpRequest.on('dataEnd', () => {
@@ -496,6 +673,7 @@ struct AiAssistant {
         setTimeout(() => {
           this.scroller.scrollEdge(Edge.Bottom);
         }, 100);
+        httpRequest.destroy();
       });
 
       await httpRequest.requestInStream(DEEPSEEK_API_URL, {
@@ -561,18 +739,56 @@ struct AiAssistant {
     });
   }
 
-  // ArrayBuffer 转字符串
-  arrayBufferToString(buffer: ArrayBuffer): string {
-    const uint8Array = new Uint8Array(buffer);
-    let str = '';
-    for (let i = 0; i < uint8Array.length; i++) {
-      str += String.fromCharCode(uint8Array[i]);
+  private decodeUtf8(bytes: Uint8Array): string {
+    // non-streaming decode
+    return new util.TextDecoder().decodeWithStream(bytes);
+  }
+
+  private decodeUtf8WithStream(bytes: Uint8Array): string {
+    // streaming decode to avoid breaking multi-byte chars
+    return this.deepSeekDecoder.decodeWithStream(bytes);
+  }
+
+  private consumeDeepSeekSseBuffer(msgIndex: number) {
+    // SSE events are separated by a blank line
+    let sepIndex = this.deepSeekSseBuffer.indexOf('\n\n');
+    while (sepIndex !== -1) {
+      const eventRaw = this.deepSeekSseBuffer.slice(0, sepIndex);
+      this.deepSeekSseBuffer = this.deepSeekSseBuffer.slice(sepIndex + 2);
+      this.handleDeepSeekSseEvent(eventRaw, msgIndex);
+      sepIndex = this.deepSeekSseBuffer.indexOf('\n\n');
     }
-    // 处理 UTF-8
-    try {
-      return decodeURIComponent(escape(str));
-    } catch (e) {
-      return str;
+  }
+
+  private handleDeepSeekSseEvent(eventRaw: string, msgIndex: number) {
+    const lines = eventRaw.split('\n');
+    for (const line of lines) {
+      if (!line.startsWith('data:')) {
+        continue;
+      }
+      const dataStr = line.slice(5).trim();
+      if (dataStr === '[DONE]') {
+        continue;
+      }
+      try {
+        const chunk = JSON.parse(dataStr) as Record<string, Object>;
+        const choices = chunk['choices'] as Array<Record<string, Object>>;
+        if (!choices || choices.length === 0) {
+          continue;
+        }
+        const delta = choices[0]['delta'] as Record<string, string>;
+        const contentDelta = delta ? delta['content'] : '';
+        if (contentDelta && contentDelta.length > 0) {
+          this.messages[msgIndex] = {
+            role: 'assistant',
+            content: this.messages[msgIndex].content + contentDelta,
+            timestamp: this.messages[msgIndex].timestamp
+          };
+          this.scroller.scrollEdge(Edge.Bottom);
+        }
+      } catch (e) {
+        // ignore malformed/incomplete JSON
+      }
     }
   }
 

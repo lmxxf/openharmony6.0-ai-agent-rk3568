@@ -440,12 +440,14 @@ static void StreamGenerateExecute(napi_env env, void* data) {
     batch.n_tokens = n_tokens;
 
     // Decode prompt
+    LOGI("Stream decode prompt start");
     if (llama_decode(g_ctx, batch) != 0) {
         llama_batch_free(batch);
         ctx->errorMsg = "[Error: decode failed]";
         ctx->success = false;
         return;
     }
+    LOGI("Stream decode prompt done");
 
     // Generate tokens with streaming
     g_generating = true;
@@ -468,7 +470,10 @@ static void StreamGenerateExecute(napi_env env, void* data) {
             cbData->token = std::string(buf, len);
             cbData->isDone = false;
             cbData->isError = false;
-            napi_call_threadsafe_function(ctx->tsfn, cbData, napi_tsfn_blocking);
+            napi_status callStatus = napi_call_threadsafe_function(ctx->tsfn, cbData, napi_tsfn_nonblocking);
+            if (callStatus != napi_ok) {
+                delete cbData;
+            }
             generated++;
         }
 
@@ -494,7 +499,10 @@ static void StreamGenerateExecute(napi_env env, void* data) {
     doneData->token = "";
     doneData->isDone = true;
     doneData->isError = false;
-    napi_call_threadsafe_function(ctx->tsfn, doneData, napi_tsfn_blocking);
+    napi_status doneStatus = napi_call_threadsafe_function(ctx->tsfn, doneData, napi_tsfn_nonblocking);
+    if (doneStatus != napi_ok) {
+        delete doneData;
+    }
 
     LOGI("Stream generated %{public}d tokens", generated);
     ctx->success = true;
@@ -559,7 +567,7 @@ static napi_value GenerateStream(napi_env env, napi_callback_info info) {
         args[2],          // JS callback function
         nullptr,          // async_resource
         resourceName,     // async_resource_name
-        0,                // max_queue_size (0 = unlimited)
+        1024,             // max_queue_size
         1,                // initial_thread_count
         nullptr,          // thread_finalize_data
         nullptr,          // thread_finalize_cb
