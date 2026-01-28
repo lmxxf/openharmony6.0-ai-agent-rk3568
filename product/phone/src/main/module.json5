@@ -267,6 +267,10 @@
       },
       {
         "name": "ohos.permission.MANAGE_USB_CONFIG"
+      },
+      {
+        "name": "ohos.permission.INTERNET",
+        "reason": "$string:INTERNET"
       }
     ]
   }

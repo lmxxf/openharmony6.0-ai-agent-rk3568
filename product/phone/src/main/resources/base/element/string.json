@@ -1863,6 +1863,10 @@
     {
       "name": "ai_assistant",
       "value": "AI 助手"
+    },
+    {
+      "name": "INTERNET",
+      "value": "AI助手需要访问网络以连接云端模型"
     }
   ]
 }

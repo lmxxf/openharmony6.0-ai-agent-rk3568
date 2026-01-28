@@ -8,11 +8,26 @@ import ConfigData from '../../../../../../common/utils/src/main/ets/default/base
 import LogUtil from '../../../../../../common/utils/src/main/ets/default/baseUtil/LogUtil';
 import HeadComponent from '../../../../../../common/component/src/main/ets/default/headComponent';
 import llama from "libllama_napi.so";
+import http from '@ohos.net.http';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+}
+
+// DeepSeek API 消息格式
+interface ApiMessage {
+  role: string;
+  content: string;
+}
+
+// DeepSeek API 请求体
+interface ApiRequestBody {
+  model: string;
+  messages: ApiMessage[];
+  stream: boolean;
+  max_tokens: number;
 }
 
 // 模型配置
@@ -22,10 +37,29 @@ interface ModelConfig {
   size: string;
 }
 
+// 推理模式
+type InferenceMode = 'local' | 'cloud';
+
+interface InferenceModeConfig {
+  name: string;
+  mode: InferenceMode;
+  desc: string;
+}
+
+const INFERENCE_MODES: InferenceModeConfig[] = [
+  { name: '本地推理', mode: 'local', desc: '离线可用，较慢' },
+  { name: '云端 DeepSeek', mode: 'cloud', desc: '需联网，快速' },
+];
+
 const AVAILABLE_MODELS: ModelConfig[] = [
   { name: 'Qwen2.5-0.5B', path: '/data/storage/el2/base/files/qwen2.5-0.5b-q4.gguf', size: '470MB' },
   { name: 'Qwen3-0.6B', path: '/data/storage/el2/base/files/qwen3-0.6b-q4.gguf', size: '381MB' },
 ];
+
+// DeepSeek API 配置（运行时从 rawfile/api_config.json 加载）
+let DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+let DEEPSEEK_API_KEY = '';
+let DEEPSEEK_MODEL = 'deepseek-chat';
 
 const N_THREADS = 8;
 
@@ -39,11 +73,54 @@ struct AiAssistant {
   @State modelLoaded: boolean = false;
   @State currentModelIndex: number = 0;
   @State showModelPicker: boolean = false;
+  @State inferenceMode: InferenceMode = 'cloud'; // 默认云端，因为本地太慢
+  @State showModePicker: boolean = false;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear() {
     LogUtil.info('AiAssistant aboutToAppear');
-    this.loadModel();
+    // 加载 API 配置
+    this.loadApiConfig();
+
+    if (this.inferenceMode === 'local') {
+      this.loadModel();
+    } else {
+      this.modelStatus = '云端 DeepSeek';
+      this.modelLoaded = true; // 云端模式始终可用
+    }
+  }
+
+  async loadApiConfig() {
+    try {
+      const context = getContext(this);
+      const resourceManager = context.resourceManager;
+      const configData = await resourceManager.getRawFileContent('api_config.json');
+
+      // Uint8Array 转字符串
+      let configStr = '';
+      for (let i = 0; i < configData.length; i++) {
+        configStr += String.fromCharCode(configData[i]);
+      }
+
+      const config = JSON.parse(configStr) as Record<string, string>;
+      if (config['deepseek_api_key']) {
+        DEEPSEEK_API_KEY = config['deepseek_api_key'];
+        LogUtil.info('API Key loaded from config');
+      }
+      if (config['deepseek_api_url']) {
+        DEEPSEEK_API_URL = config['deepseek_api_url'];
+      }
+      if (config['deepseek_model']) {
+        DEEPSEEK_MODEL = config['deepseek_model'];
+      }
+    } catch (error) {
+      LogUtil.error('Failed to load API config: ' + JSON.stringify(error));
+      // 配置加载失败时，云端模式不可用
+      if (this.inferenceMode === 'cloud') {
+        this.modelStatus = 'API 配置缺失';
+        this.modelLoaded = false;
+      }
+    }
   }
 
   aboutToDisappear() {
@@ -88,6 +165,22 @@ struct AiAssistant {
     this.loadModel();
   }
 
+  switchInferenceMode(mode: InferenceMode) {
+    if (mode === this.inferenceMode) {
+      return;
+    }
+    this.inferenceMode = mode;
+    this.messages = [];
+
+    if (mode === 'local') {
+      this.modelLoaded = false;
+      this.loadModel();
+    } else {
+      this.modelStatus = '云端 DeepSeek';
+      this.modelLoaded = true;
+    }
+  }
+
   build() {
     Column() {
       // 顶部导航栏
@@ -106,18 +199,32 @@ struct AiAssistant {
 
         Blank()
 
-        Button('切换模型')
+        // 模式切换按钮
+        Button(this.inferenceMode === 'local' ? '本地' : '云端')
           .fontSize(12)
           .height(28)
-          .backgroundColor('#007AFF')
+          .backgroundColor(this.inferenceMode === 'local' ? '#52c41a' : '#007AFF')
           .onClick(() => {
-            this.showModelPicker = true;
+            this.showModePicker = true;
           })
+          .bindMenu(this.showModePicker, this.ModePickerMenu())
+
+        // 本地模式才显示模型切换
+        if (this.inferenceMode === 'local') {
+          Button('切换模型')
+            .fontSize(12)
+            .height(28)
+            .backgroundColor('#007AFF')
+            .margin({ left: 8 })
+            .onClick(() => {
+              this.showModelPicker = true;
+            })
+            .bindMenu(this.showModelPicker, this.ModelPickerMenu())
+        }
       }
       .width(ConfigData.WH_100_100)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .backgroundColor('#f5f5f5')
-      .bindMenu(this.showModelPicker, this.ModelPickerMenu())
 
       // 聊天消息列表
       Scroll(this.scroller) {
@@ -133,11 +240,15 @@ struct AiAssistant {
                 .fontSize(24)
                 .fontWeight(FontWeight.Bold)
                 .margin({ top: 16 })
-              Text(`当前模型: ${AVAILABLE_MODELS[this.currentModelIndex].name}`)
+              Text(this.inferenceMode === 'local'
+                ? `当前模型: ${AVAILABLE_MODELS[this.currentModelIndex].name}`
+                : '当前模型: DeepSeek Chat')
                 .fontSize(14)
                 .fontColor('#999999')
                 .margin({ top: 8 })
-              Text('在设备端运行，保护您的隐私')
+              Text(this.inferenceMode === 'local'
+                ? '在设备端运行，保护您的隐私'
+                : '云端推理，快速响应')
                 .fontSize(12)
                 .fontColor('#cccccc')
                 .margin({ top: 4 })
@@ -228,6 +339,24 @@ struct AiAssistant {
   }
 
   @Builder
+  ModePickerMenu() {
+    Menu() {
+      ForEach(INFERENCE_MODES, (modeConfig: InferenceModeConfig) => {
+        MenuItem({
+          content: `${modeConfig.name} - ${modeConfig.desc}`,
+        })
+          .selected(modeConfig.mode === this.inferenceMode)
+          .onChange((selected: boolean) => {
+            if (selected) {
+              this.showModePicker = false;
+              this.switchInferenceMode(modeConfig.mode);
+            }
+          })
+      })
+    }
+  }
+
+  @Builder
   MessageBubble(msg: ChatMessage) {
     Row() {
       if (msg.role === 'assistant') {
@@ -290,6 +419,108 @@ struct AiAssistant {
       this.scroller.scrollEdge(Edge.Bottom);
     }, 100);
 
+    if (this.inferenceMode === 'cloud') {
+      // 云端 DeepSeek API
+      this.sendToDeepSeek(msgIndex);
+    } else {
+      // 本地推理
+      this.sendToLocal(prompt, msgIndex);
+    }
+  }
+
+  // 云端 DeepSeek 推理
+  async sendToDeepSeek(msgIndex: number) {
+    // 构造消息历史
+    const apiMessages: ApiMessage[] = [
+      { role: 'system', content: '你是一个运行在OpenHarmony设备上的AI助手。请简洁回答用户问题。' } as ApiMessage
+    ];
+
+    // 添加历史对话（最近 4 轮）
+    const recentMessages = this.messages.slice(-5, -1); // 排除刚加的空 assistant 消息
+    for (const msg of recentMessages) {
+      const apiMsg: ApiMessage = { role: msg.role, content: msg.content };
+      apiMessages.push(apiMsg);
+    }
+
+    const requestBody: ApiRequestBody = {
+      model: DEEPSEEK_MODEL,
+      messages: apiMessages,
+      stream: true,
+      max_tokens: 1024
+    };
+    const requestBodyStr = JSON.stringify(requestBody);
+
+    LogUtil.info('DeepSeek request: ' + requestBodyStr);
+
+    try {
+      let httpRequest = http.createHttp();
+
+      // 流式请求
+      httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+        const text = this.arrayBufferToString(data);
+        LogUtil.info('DeepSeek chunk: ' + text);
+
+        // 解析 SSE 格式
+        const lines = text.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === '[DONE]') {
+              continue;
+            }
+            try {
+              const chunk = JSON.parse(jsonStr) as Record<string, Object>;
+              const choices = chunk['choices'] as Array<Record<string, Object>>;
+              if (choices && choices.length > 0) {
+                const delta = choices[0]['delta'] as Record<string, string>;
+                if (delta && delta['content']) {
+                  // 追加内容
+                  this.messages[msgIndex] = {
+                    role: 'assistant',
+                    content: this.messages[msgIndex].content + delta['content'],
+                    timestamp: this.messages[msgIndex].timestamp
+                  };
+                  this.scroller.scrollEdge(Edge.Bottom);
+                }
+              }
+            } catch (e) {
+              // 忽略解析错误（可能是不完整的 JSON）
+            }
+          }
+        }
+      });
+
+      httpRequest.on('dataEnd', () => {
+        LogUtil.info('DeepSeek stream ended');
+        this.isLoading = false;
+        setTimeout(() => {
+          this.scroller.scrollEdge(Edge.Bottom);
+        }, 100);
+      });
+
+      await httpRequest.requestInStream(DEEPSEEK_API_URL, {
+        method: http.RequestMethod.POST,
+        header: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+        },
+        extraData: requestBodyStr,
+        expectDataType: http.HttpDataType.STRING
+      });
+
+    } catch (error) {
+      this.messages[msgIndex] = {
+        role: 'assistant',
+        content: 'API 请求出错: ' + JSON.stringify(error),
+        timestamp: Date.now()
+      };
+      LogUtil.error('DeepSeek error: ' + JSON.stringify(error));
+      this.isLoading = false;
+    }
+  }
+
+  // 本地推理
+  sendToLocal(prompt: string, msgIndex: number) {
     // 构造对话格式的 prompt
     const formattedPrompt: string = this.formatPrompt(prompt);
 
@@ -328,6 +559,21 @@ struct AiAssistant {
         this.scroller.scrollEdge(Edge.Bottom);
       }, 100);
     });
+  }
+
+  // ArrayBuffer 转字符串
+  arrayBufferToString(buffer: ArrayBuffer): string {
+    const uint8Array = new Uint8Array(buffer);
+    let str = '';
+    for (let i = 0; i < uint8Array.length; i++) {
+      str += String.fromCharCode(uint8Array[i]);
+    }
+    // 处理 UTF-8
+    try {
+      return decodeURIComponent(escape(str));
+    } catch (e) {
+      return str;
+    }
   }
 
   // 格式化 prompt 为 Qwen3 对话格式

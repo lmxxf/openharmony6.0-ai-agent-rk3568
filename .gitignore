@@ -8,3 +8,6 @@
 llama_cpp/
 napi/
 product/phone/libs/
+
+# API Key 配置文件（勿提交）
+**/rawfile/api_config.json
