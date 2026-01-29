@@ -1,8 +1,8 @@
-# 手机端开源 AI Agent 调研报告
+# OpenHarmony AI Agent 调研报告
 
 > 调研时间：2026-01-29
 >
-> 调研目的：梳理当前手机端开源 GUI Agent 方案，为 OpenHarmony AI Agent 项目提供参考
+> 调研目的：梳理手机端开源 GUI Agent 方案，明确 OpenHarmony AI Agent 项目的生态定位与技术路线
 
 ---
 
