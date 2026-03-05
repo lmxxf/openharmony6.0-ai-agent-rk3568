@@ -35,7 +35,28 @@ if [ -f "$HAP_PATH" ]; then
     echo "=== 编译成功 ==="
     echo "HAP 路径: $HAP_PATH"
     echo ""
-    echo "安装命令: hdc install $HAP_PATH"
+
+    # 安装到设备
+    if command -v hdc &> /dev/null; then
+        echo "安装 HAP..."
+        hdc install "$HAP_PATH"
+
+        # 修复 SSL 根证书（RK3568 出厂证书包不全，缺少 DigiCert/GeoTrust 等常用 CA，
+        # 会导致 HTTPS 请求报错 2300060 "SSL peer certificate was not OK"）
+        CACERT="product/phone/src/main/resources/rawfile/cacert.pem"
+        if [ -f "$CACERT" ]; then
+            echo "推送 CA 根证书到设备..."
+            hdc shell 'mount -o remount,rw /'
+            hdc file send "$CACERT" /etc/ssl/certs/cacert.pem
+            echo "CA 根证书已更新"
+        fi
+
+        echo ""
+        echo "=== 部署完成 ==="
+    else
+        echo "hdc 未找到，请手动安装:"
+        echo "  hdc install $HAP_PATH"
+    fi
 else
     echo ""
     echo "=== 编译失败 ==="

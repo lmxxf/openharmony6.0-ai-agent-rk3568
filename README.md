@@ -217,6 +217,17 @@ hdc -t <device_id> shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos
 
 ## 🔧 常见问题
 
+### Q: 云端模式报错 `2300060 "SSL peer certificate or SSH remote key was not OK"`
+**A:** RK3568 等开发板出厂的 CA 根证书包（`/etc/ssl/certs/cacert.pem`）只有约 111 个证书，缺少 DigiCert/GeoTrust 等常用 CA，导致 HTTPS 请求 SSL 验证失败。
+
+`build.sh` 会在安装 HAP 后自动推送完整的 Mozilla CA 证书包到设备。如果你手动安装，需要额外执行：
+```bash
+hdc shell 'mount -o remount,rw /'
+hdc file send product/phone/src/main/resources/rawfile/cacert.pem /etc/ssl/certs/cacert.pem
+```
+
+> **注意**：设备恢复出厂设置或刷机后需要重新推送。`build.sh` 每次部署都会自动执行此步骤。
+
 ### Q: 运行时提示 "模块导入失败"
 **A:** 检查 hilog 日志：
 ```bash
@@ -335,7 +346,8 @@ settings/
 │   │       └── ic_ai.svg         # AI 助手图标
 │   ├── src/main/resources/rawfile/
 │   │   ├── api_config.json       # DeepSeek API 配置（gitignore）
-│   │   └── api_config.json.example  # 配置示例
+│   │   ├── api_config.json.example  # 配置示例
+│   │   └── cacert.pem            # Mozilla CA 根证书包（修复 SSL）
 │   └── libs/arm64-v8a/           # 预编译的 .so 库
 ├── build_napi_arm64.sh           # NAPI 编译脚本
 ├── build_all_ai_arm64.sh         # 一键编译脚本
