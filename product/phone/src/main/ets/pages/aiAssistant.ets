@@ -15,6 +15,7 @@ import dateAndTimeModel from '../model/dateAndTimeImpl/DateAndTimeModel';
 import { BrightnessSettingModel } from '../model/displayAndBrightnessImpl/brightness/BrightnessSettingModel';
 import { McpClient, McpServerConfig, McpToolOpenAi } from '../model/mcpImpl/McpClient';
 import { VectorRagService, VectorRagConfig, KbChunkInput } from '../model/ragImpl/VectorRagService';
+import dataPreferences from '@ohos.data.preferences';
 
 // ============================================================
 // 基础消息类型
@@ -206,10 +207,13 @@ struct AiAssistant {
   private knowledgeChunks: KbChunk[] = [];
   // [RAG] 向量检索服务
   private vectorRagService: VectorRagService = new VectorRagService();
+  // [持久化] 聊天记录存储
+  private chatPreferences: dataPreferences.Preferences | null = null;
 
   aboutToAppear() {
     LogUtil.info('AiAssistant aboutToAppear');
     this.allTools = [...MCP_TOOLS] as McpToolOpenAi[];
+    this.initChatHistory();
 
     if (this.inferenceMode === 'local') {
       this.loadApiConfig();
@@ -222,6 +226,49 @@ struct AiAssistant {
       Promise.all([this.loadApiConfig(), this.loadKnowledgeBase()]).then(() => {
         this.initVectorRag();
       });
+    }
+  }
+
+  // ============================================================
+  // [持久化] 聊天记录 load / save / clear
+  // ============================================================
+
+  private async initChatHistory() {
+    try {
+      this.chatPreferences = await dataPreferences.getPreferences(getContext(this), 'ai_chat_history');
+      const json = await this.chatPreferences.get('messages', '[]') as string;
+      this.messages = JSON.parse(json) as ChatMessage[];
+      LogUtil.info('[ChatHistory] Loaded ' + this.messages.length + ' messages');
+    } catch (e) {
+      LogUtil.error('[ChatHistory] Load failed: ' + JSON.stringify(e));
+    }
+  }
+
+  private async saveChatHistory() {
+    if (!this.chatPreferences) {
+      return;
+    }
+    try {
+      const MAX = 100;
+      const toSave = this.messages.length > MAX ? this.messages.slice(this.messages.length - MAX) : this.messages;
+      await this.chatPreferences.put('messages', JSON.stringify(toSave));
+      await this.chatPreferences.flush();
+    } catch (e) {
+      LogUtil.error('[ChatHistory] Save failed: ' + JSON.stringify(e));
+    }
+  }
+
+  private async clearChatHistory() {
+    this.messages = [];
+    if (!this.chatPreferences) {
+      return;
+    }
+    try {
+      await this.chatPreferences.delete('messages');
+      await this.chatPreferences.flush();
+      LogUtil.info('[ChatHistory] Cleared');
+    } catch (e) {
+      LogUtil.error('[ChatHistory] Clear failed: ' + JSON.stringify(e));
     }
   }
 
@@ -565,7 +612,7 @@ struct AiAssistant {
     }
     this.currentModelIndex = index;
     this.modelLoaded = false;
-    this.messages = [];
+    this.clearChatHistory();
     this.loadModel();
   }
 
@@ -574,7 +621,7 @@ struct AiAssistant {
       return;
     }
     this.inferenceMode = mode;
-    this.messages = [];
+    this.clearChatHistory();
 
     if (mode === 'local') {
       this.modelLoaded = false;
@@ -625,6 +672,15 @@ struct AiAssistant {
             })
             .bindMenu(this.showModelPicker, this.ModelPickerMenu())
         }
+
+        Button('清空')
+          .fontSize(12)
+          .height(28)
+          .backgroundColor('#FF4444')
+          .margin({ left: 8 })
+          .onClick(() => {
+            this.clearChatHistory();
+          })
       }
       .width(ConfigData.WH_100_100)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
@@ -806,6 +862,7 @@ struct AiAssistant {
       timestamp: Date.now()
     };
     this.messages.push(userMessage);
+    this.saveChatHistory();
     const prompt = this.inputText.trim();
     this.inputText = '';
     this.isLoading = true;
@@ -842,6 +899,7 @@ struct AiAssistant {
         timestamp: Date.now()
       };
       this.isLoading = false;
+      this.saveChatHistory();
       return;
     }
 
@@ -907,6 +965,7 @@ struct AiAssistant {
           this.handleToolCallsAndFollowUp(msgIndex);
         } else {
           this.isLoading = false;
+          this.saveChatHistory();
           setTimeout(() => {
             this.scroller.scrollEdge(Edge.Bottom);
           }, 100);
@@ -932,6 +991,7 @@ struct AiAssistant {
       };
       LogUtil.error('[MCP] DeepSeek error: ' + JSON.stringify(error));
       this.isLoading = false;
+      this.saveChatHistory();
     }
   }
 
@@ -1121,6 +1181,7 @@ struct AiAssistant {
         this.scroller.scrollEdge(Edge.Bottom);
       } else {
         this.isLoading = false;
+        this.saveChatHistory();
         setTimeout(() => {
           this.scroller.scrollEdge(Edge.Bottom);
         }, 100);
@@ -1136,6 +1197,7 @@ struct AiAssistant {
       };
       LogUtil.error('Generate error: ' + JSON.stringify(error));
       this.isLoading = false;
+      this.saveChatHistory();
 
       setTimeout(() => {
         this.scroller.scrollEdge(Edge.Bottom);
