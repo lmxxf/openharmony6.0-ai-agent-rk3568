@@ -11,7 +11,8 @@
 - **双模式推理**：
   - 🏠 **本地模式**：llama.cpp + Qwen3-0.6B，离线可用，保护隐私
   - ☁️ **云端模式**：DeepSeek API，快速响应，流式输出
-- **UI-Agent（Demo）**：在 Settings App 内一句话执行“蓝牙/亮度/日期时间”（不依赖无障碍、不跨应用）
+- **MCP Tool Calling**：通过 DeepSeek Function Calling 实现设备控制 Agent，LLM 自主决定调用工具（[详见 MCP 实现文档](mcp-impl.md)）
+- **RAG 知识检索**：端侧轻量级 RAG，本地知识库随 HAP 打包，关键词检索注入 system prompt（[详见 RAG 实现文档](rag-impl.md)）
 - **通用 ARM64 适配**：支持所有 ARMv8-A 架构设备（RK3568、展锐 P7885 等），开启 NEON 指令集优化
 - **系统级集成**：直接注入原生 Settings 列表，无需作为第三方应用安装，拥有更高的系统权限
 - **异步推理**：使用 NAPI 异步工作线程（本地）或 HTTP 流式请求（云端），推理过程不阻塞 UI
@@ -139,13 +140,27 @@ cp product/phone/src/main/resources/rawfile/api_config.json.example \
 - **默认云端模式**：直接开始对话（需联网 + 已配置 API Key）
 - **切换本地模式**：点击顶部"云端"按钮 → 选择"本地推理"（需已推送模型文件）
 
-#### 6.1 UI-Agent（Demo）指令
+#### 6.1 MCP 工具调用示例
 
-在聊天输入框直接输入指令；命中关键词会**直接执行**并跳转到对应页面（未命中则正常聊天）：
+云端模式下，LLM 自主决定是否调用工具（无需精确关键词，自然语言即可）：
 
-- 蓝牙：`打开蓝牙` / `关闭蓝牙` / `切换蓝牙`（或 `蓝牙开关`）
-- 亮度：`亮度 35%` / `亮度35` / `设置亮度 80`
-- 日期时间：`切到24小时制` / `切到12小时制`
+- 蓝牙控制：`帮我打开蓝牙` / `关一下蓝牙` / `bluetooth on`
+- 亮度调节：`把亮度调到50%` / `屏幕太暗了调亮一点`
+- 时间格式：`切到24小时制` / `我想用12小时的时间格式`
+- 设备状态：`蓝牙开着没？` / `现在亮度多少？`
+- 多步操作：`打开蓝牙并把亮度调到80%`
+
+> 技术细节见 [MCP 实现文档](mcp-impl.md)
+
+#### 6.2 RAG 知识问答示例
+
+当问题涉及设备使用、OpenHarmony 特性等知识时，会自动检索本地知识库：
+
+- `OpenHarmony 6.0 有什么新特性？`
+- `蓝牙连不上怎么办？`
+- `ArkTS 和 TypeScript 有什么区别？`
+
+> 技术细节见 [RAG 实现文档](rag-impl.md)
 
 ## 🔄 跨设备部署
 
@@ -349,7 +364,12 @@ settings/
 │   ├── src/main/resources/rawfile/
 │   │   ├── api_config.json       # DeepSeek API 配置（gitignore）
 │   │   ├── api_config.json.example  # 配置示例
-│   │   └── cacert.pem            # Mozilla CA 根证书包（修复 SSL）
+│   │   ├── cacert.pem            # Mozilla CA 根证书包（修复 SSL）
+│   │   └── knowledge/            # [RAG] 知识库文件
+│   │       ├── kb_index.json     # 文档元数据索引
+│   │       ├── device_manual.txt # 设备使用手册
+│   │       ├── oh6_features.txt  # OpenHarmony 6.0 特性
+│   │       └── settings_faq.txt  # 常见问题 Q&A
 │   └── libs/arm64-v8a/           # 预编译的 .so 库
 ├── build_napi_arm64.sh           # NAPI 编译脚本
 ├── build_all_ai_arm64.sh         # 一键编译脚本
