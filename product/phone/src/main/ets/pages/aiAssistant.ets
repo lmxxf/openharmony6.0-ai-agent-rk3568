@@ -14,6 +14,7 @@ import bluetoothModel from '../model/bluetoothImpl/BluetoothModel';
 import dateAndTimeModel from '../model/dateAndTimeImpl/DateAndTimeModel';
 import { BrightnessSettingModel } from '../model/displayAndBrightnessImpl/brightness/BrightnessSettingModel';
 import { McpClient, McpServerConfig, McpToolOpenAi } from '../model/mcpImpl/McpClient';
+import { VectorRagService, VectorRagConfig, KbChunkInput } from '../model/ragImpl/VectorRagService';
 
 // ============================================================
 // 基础消息类型
@@ -149,6 +150,11 @@ let DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 let DEEPSEEK_API_KEY = '';
 let DEEPSEEK_MODEL = 'deepseek-chat';
 
+// SiliconFlow Embedding 配置
+let SILICONFLOW_API_KEY = '';
+let SILICONFLOW_API_URL = 'https://api.siliconflow.cn/v1/embeddings';
+let EMBEDDING_MODEL = 'BAAI/bge-m3';
+
 const N_THREADS = 8;
 
 // ============================================================
@@ -198,18 +204,24 @@ struct AiAssistant {
   private allTools: McpToolOpenAi[] = [];
   // [RAG] 知识库切片
   private knowledgeChunks: KbChunk[] = [];
+  // [RAG] 向量检索服务
+  private vectorRagService: VectorRagService = new VectorRagService();
 
   aboutToAppear() {
     LogUtil.info('AiAssistant aboutToAppear');
     this.allTools = [...MCP_TOOLS] as McpToolOpenAi[];
-    this.loadApiConfig();
-    this.loadKnowledgeBase();
 
     if (this.inferenceMode === 'local') {
+      this.loadApiConfig();
+      this.loadKnowledgeBase();
       this.loadModel();
     } else {
       this.modelStatus = '云端 DeepSeek (MCP+RAG)';
       this.modelLoaded = true;
+      // API Config + 知识库都加载完后，初始化向量 RAG
+      Promise.all([this.loadApiConfig(), this.loadKnowledgeBase()]).then(() => {
+        this.initVectorRag();
+      });
     }
   }
 
@@ -230,6 +242,17 @@ struct AiAssistant {
       if (config['deepseek_model']) {
         DEEPSEEK_MODEL = config['deepseek_model'] as string;
       }
+      // [RAG] SiliconFlow Embedding 配置
+      if (config['siliconflow_api_key']) {
+        SILICONFLOW_API_KEY = config['siliconflow_api_key'] as string;
+        LogUtil.info('[RAG] SiliconFlow API Key loaded');
+      }
+      if (config['siliconflow_api_url']) {
+        SILICONFLOW_API_URL = config['siliconflow_api_url'] as string;
+      }
+      if (config['embedding_model']) {
+        EMBEDDING_MODEL = config['embedding_model'] as string;
+      }
       // [MCP] 加载远程 MCP Server 配置
       const mcpServersVal = config['mcp_servers'];
       if (mcpServersVal) {
@@ -246,6 +269,27 @@ struct AiAssistant {
         this.modelLoaded = false;
       }
     }
+  }
+
+  // ============================================================
+  // [RAG] 向量 RAG 初始化
+  // ============================================================
+
+  private async initVectorRag() {
+    const config: VectorRagConfig = {
+      apiKey: SILICONFLOW_API_KEY,
+      apiUrl: SILICONFLOW_API_URL,
+      model: EMBEDDING_MODEL
+    };
+    const context = getContext(this);
+    await this.vectorRagService.init(context, config);
+    // 异步构建索引，不阻塞 UI
+    const chunks: KbChunkInput[] = [];
+    for (const c of this.knowledgeChunks) {
+      const item: KbChunkInput = { docId: c.docId, text: c.text, keywords: c.keywords };
+      chunks.push(item);
+    }
+    this.vectorRagService.buildIndex(chunks);
   }
 
   // ============================================================
@@ -365,10 +409,25 @@ struct AiAssistant {
     return results;
   }
 
-  private buildSystemPromptWithRAG(userQuery: string): string {
+  private async buildSystemPromptWithRAG(userQuery: string): Promise<string> {
     const basePrompt = '你是一个运行在 OpenHarmony 设备上的 AI 助手。你可以使用工具来控制设备设置（蓝牙、亮度、时间格式等），也可以查询设备状态。请根据用户意图决定是否调用工具，并用简洁的中文回答。';
 
-    const relevantChunks = this.retrieveRelevantChunks(userQuery);
+    let relevantChunks: string[];
+
+    if (this.vectorRagService.isReady()) {
+      // 主路径：向量检索
+      relevantChunks = await this.vectorRagService.retrieveByVector(userQuery, 3);
+      if (relevantChunks.length === 0) {
+        // 向量检索无结果，降级到关键词匹配
+        relevantChunks = this.retrieveRelevantChunks(userQuery);
+      }
+      LogUtil.info('[RAG] Vector retrieval: ' + relevantChunks.length + ' chunks');
+    } else {
+      // 降级：关键词匹配
+      relevantChunks = this.retrieveRelevantChunks(userQuery);
+      LogUtil.info('[RAG] Keyword fallback: ' + relevantChunks.length + ' chunks');
+    }
+
     if (relevantChunks.length === 0) {
       return basePrompt;
     }
@@ -786,8 +845,8 @@ struct AiAssistant {
       return;
     }
 
-    // [RAG] 构造带知识检索的 system prompt
-    const systemPrompt = this.buildSystemPromptWithRAG(userQuery);
+    // [RAG] 构造带知识检索的 system prompt（向量检索 or 关键词降级）
+    const systemPrompt = await this.buildSystemPromptWithRAG(userQuery);
 
     // 构造消息历史
     const apiMessages: Object[] = [
@@ -910,9 +969,11 @@ struct AiAssistant {
 
     // 显示中间状态
     const toolSummary = toolResults.map(r => r.result).join('; ');
+    const existingContent = this.messages[msgIndex].content;
+    const prefix = existingContent.length > 0 ? existingContent + '\n———————————————\n' : '';
     this.messages[msgIndex] = {
       role: 'assistant',
-      content: '[MCP 工具执行] ' + toolSummary + '\n',
+      content: prefix + '[MCP 工具执行] ' + toolSummary + '\n———————————————\n',
       timestamp: this.messages[msgIndex].timestamp
     };
     this.scroller.scrollEdge(Edge.Bottom);
