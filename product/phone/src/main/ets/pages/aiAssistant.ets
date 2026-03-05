@@ -13,6 +13,7 @@ import util from '@ohos.util';
 import bluetoothModel from '../model/bluetoothImpl/BluetoothModel';
 import dateAndTimeModel from '../model/dateAndTimeImpl/DateAndTimeModel';
 import { BrightnessSettingModel } from '../model/displayAndBrightnessImpl/brightness/BrightnessSettingModel';
+import { McpClient, McpServerConfig, McpToolOpenAi } from '../model/mcpImpl/McpClient';
 
 // ============================================================
 // 基础消息类型
@@ -191,11 +192,16 @@ struct AiAssistant {
   private toolCallArgBuffers: Map<number, string> = new Map();
   private currentStreamMsgIndex: number = -1;
   private currentStreamMessages: Object[] = [];
+  // [MCP] 远程 MCP Client
+  private mcpClient: McpClient = new McpClient();
+  private remoteToolRouteMap: Map<string, number> = new Map();
+  private allTools: McpToolOpenAi[] = [];
   // [RAG] 知识库切片
   private knowledgeChunks: KbChunk[] = [];
 
   aboutToAppear() {
     LogUtil.info('AiAssistant aboutToAppear');
+    this.allTools = [...MCP_TOOLS] as McpToolOpenAi[];
     this.loadApiConfig();
     this.loadKnowledgeBase();
 
@@ -213,16 +219,25 @@ struct AiAssistant {
       const resourceManager = context.resourceManager;
       const configData = await resourceManager.getRawFileContent('api_config.json');
       const configStr = this.decodeUtf8(configData);
-      const config = JSON.parse(configStr) as Record<string, string>;
+      const config = JSON.parse(configStr) as Record<string, Object>;
       if (config['deepseek_api_key']) {
-        DEEPSEEK_API_KEY = config['deepseek_api_key'];
+        DEEPSEEK_API_KEY = config['deepseek_api_key'] as string;
         LogUtil.info('[MCP] API Key loaded');
       }
       if (config['deepseek_api_url']) {
-        DEEPSEEK_API_URL = config['deepseek_api_url'];
+        DEEPSEEK_API_URL = config['deepseek_api_url'] as string;
       }
       if (config['deepseek_model']) {
-        DEEPSEEK_MODEL = config['deepseek_model'];
+        DEEPSEEK_MODEL = config['deepseek_model'] as string;
+      }
+      // [MCP] 加载远程 MCP Server 配置
+      const mcpServersVal = config['mcp_servers'];
+      if (mcpServersVal) {
+        const serversJson = JSON.stringify(mcpServersVal);
+        const servers = JSON.parse(serversJson) as McpServerConfig[];
+        if (servers.length > 0) {
+          this.initMcpServers(servers);
+        }
       }
     } catch (error) {
       LogUtil.error('[MCP] Failed to load API config: ' + JSON.stringify(error));
@@ -231,6 +246,31 @@ struct AiAssistant {
         this.modelLoaded = false;
       }
     }
+  }
+
+  // ============================================================
+  // [MCP] 远程 MCP Server 初始化
+  // ============================================================
+
+  private async initMcpServers(configs: McpServerConfig[]) {
+    LogUtil.info('[MCP] Initializing ' + configs.length + ' remote MCP servers');
+    await this.mcpClient.initAll(configs);
+
+    const remoteTools = this.mcpClient.getAllRemoteToolsAsOpenAi();
+    this.allTools = [...MCP_TOOLS as McpToolOpenAi[], ...remoteTools];
+    this.remoteToolRouteMap = this.mcpClient.buildToolRouteMap();
+
+    LogUtil.info('[MCP] Total tools available: ' + this.allTools.length +
+      ' (local: ' + MCP_TOOLS.length + ', remote: ' + remoteTools.length + ')');
+    if (this.inferenceMode === 'cloud') {
+      this.modelStatus = '云端 DeepSeek (MCP+RAG, ' + this.allTools.length + ' tools)';
+    }
+  }
+
+  private isLocalTool(name: string): boolean {
+    const localNames: string[] = ['set_bluetooth', 'set_brightness', 'set_time_format',
+      'navigate_to_page', 'query_device_status'];
+    return localNames.includes(name);
   }
 
   // ============================================================
@@ -763,8 +803,8 @@ struct AiAssistant {
     this.currentStreamMsgIndex = msgIndex;
     this.currentStreamMessages = apiMessages;
 
-    // [MCP] 带 tools 的请求
-    this.streamDeepSeekRequest(apiMessages, MCP_TOOLS, msgIndex);
+    // [MCP] 带 tools 的请求（本地 + 远程合并）
+    this.streamDeepSeekRequest(apiMessages, this.allTools as McpTool[], msgIndex);
   }
 
   // ============================================================
@@ -840,14 +880,32 @@ struct AiAssistant {
   // [MCP] Tool Calls 执行 + 后续请求
   // ============================================================
 
-  private handleToolCallsAndFollowUp(msgIndex: number) {
-    // 执行所有 tool calls
+  private async handleToolCallsAndFollowUp(msgIndex: number) {
+    // 执行所有 tool calls（本地同步执行，远程异步执行）
     const toolResults: ToolResult[] = [];
 
     for (const tc of this.pendingToolCalls) {
-      const result = this.executeMcpTool(tc.function.name, tc.function.arguments);
+      let result: string;
+      const toolName = tc.function.name;
+
+      if (this.isLocalTool(toolName)) {
+        result = this.executeMcpTool(toolName, tc.function.arguments);
+      } else {
+        // 路由到远程 MCP Server
+        const serverIndex = this.remoteToolRouteMap.get(toolName);
+        if (serverIndex !== undefined) {
+          try {
+            result = await this.mcpClient.callTool(serverIndex, toolName, tc.function.arguments);
+          } catch (e) {
+            result = '远程工具调用失败: ' + JSON.stringify(e);
+          }
+        } else {
+          result = '未知工具: ' + toolName;
+        }
+      }
+
       toolResults.push({ tool_call_id: tc.id, result: result } as ToolResult);
-      LogUtil.info('[MCP] Tool result: ' + tc.function.name + ' => ' + result);
+      LogUtil.info('[MCP] Tool result: ' + toolName + ' => ' + result.substring(0, 100));
     }
 
     // 显示中间状态
