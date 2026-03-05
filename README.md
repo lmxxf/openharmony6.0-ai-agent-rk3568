@@ -220,6 +220,8 @@ hdc -t <device_id> shell chown 20010018:20010018 /data/app/el2/100/base/com.ohos
 ### Q: 云端模式报错 `2300060 "SSL peer certificate or SSH remote key was not OK"`
 **A:** RK3568 等开发板出厂的 CA 根证书包（`/etc/ssl/certs/cacert.pem`）只有约 111 个证书，缺少 DigiCert/GeoTrust 等常用 CA，导致 HTTPS 请求 SSL 验证失败。
 
+**背景**：DeepSeek 近期更换了 SSL 证书（签发日期 2025-06-06，CA 链为 GeoTrust TLS RSA CA G1 → DigiCert）。此前的旧证书 CA 恰好在 OH6 出厂证书包内，所以之前能用；换证书后新 CA 不在包里，RK3568 和 P7885 设备同时出现此问题。
+
 `build.sh` 会在安装 HAP 后自动推送完整的 Mozilla CA 证书包到设备。如果你手动安装，需要额外执行：
 ```bash
 hdc shell 'mount -o remount,rw /'
