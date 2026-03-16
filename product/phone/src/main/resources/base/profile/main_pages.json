@@ -49,6 +49,7 @@
     "pages/abilityDialog/BluetoothPairDialog",
     "pages/vpn/vpnList",
     "pages/vpn/vpnEdit",
-    "pages/vpn/vpnConnect"
+    "pages/vpn/vpnConnect",
+    "pages/pythonRunner"
   ]
 }

@@ -237,6 +237,16 @@ struct EntryComponent {
         }
         .settingListItemFancy()
         ListItem() {
+          // Python Runner
+          SettingItemComponent({
+            targetPage: "pages/pythonRunner",
+            settingTitle: "Python Runner",
+            settingEndText: $endTextEmpty,
+            settingIcon: "/res/image/ic_ai.svg",
+          })
+        }
+        .settingListItemFancy()
+        ListItem() {
           List() {
             ListItem(){
               // WLAN
