@@ -1,7 +1,9 @@
 /**
  * Python Runner - Execute Python via NAPI fork+exec
+ * Auto-extracts Python runtime from rawfile on first launch
  */
 
+import fs from '@ohos.file.fs';
 import ConfigData from '../../../../../../common/utils/src/main/ets/default/baseUtil/ConfigData';
 import HeadComponent from '../../../../../../common/component/src/main/ets/default/headComponent';
 import execNapi from 'libexec_napi.so';
@@ -9,14 +11,89 @@ import execNapi from 'libexec_napi.so';
 @Entry
 @Component
 struct PythonRunner {
-  @State status: string = 'Ready';
+  @State status: string = 'Initializing...';
   @State output: string = '';
   @State isRunning: boolean = false;
+  @State pythonReady: boolean = false;
 
-  private pythonBase: string = '/data/storage/el2/base/haps/phone/files/python';
+  private filesDir: string = '';
+  private pythonBase: string = '';
 
   runCmd(cmd: string): string {
     return execNapi.runCommand(cmd);
+  }
+
+  aboutToAppear(): void {
+    let ctx = getContext(this);
+    this.filesDir = ctx.filesDir;
+    this.pythonBase = this.filesDir + '/python';
+
+    // Check if already extracted (use runCmd to check, fs.accessSync behaves oddly)
+    let check: string = this.runCmd('ls ' + this.pythonBase + '/bin/python3.11');
+    if (!check.includes('exit code')) {
+      this.pythonReady = true;
+      this.status = 'Ready';
+    } else {
+      this.pythonReady = false;
+      this.status = 'Not installed - click "Install Python"';
+    }
+  }
+
+  installPython(): void {
+    this.isRunning = true;
+    this.status = 'Reading rawfile (23MB)...';
+    this.output = '';
+
+    let ctx = getContext(this);
+    let tarPath: string = this.filesDir + '/python-runtime.tar.gz';
+
+    ctx.resourceManager.getRawFileContent('python-runtime.tar.gz').then((rawData: Uint8Array) => {
+      this.output = 'rawfile read: ' + rawData.byteLength + ' bytes\n';
+
+      // Write to filesDir
+      this.status = 'Writing to disk...';
+      let file: fs.File = fs.openSync(tarPath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
+      fs.writeSync(file.fd, rawData.buffer);
+      fs.closeSync(file);
+      this.output += 'written to disk\n';
+
+      // Extract
+      this.status = 'Extracting...';
+      let extractResult: string = this.runCmd('cd ' + this.filesDir + ' && tar xzf python-runtime.tar.gz');
+      this.output += 'tar: ' + (extractResult || 'OK') + '\n';
+
+      // Rename python-home/ to python/, set permissions, clean up
+      this.status = 'Setting up...';
+      let setupCmds: string[] = [
+        'mv ' + this.filesDir + '/python-home ' + this.pythonBase,
+        'chmod 755 ' + this.pythonBase + '/bin/python3.11',
+        'rm -f ' + tarPath,
+        'touch ' + this.pythonBase + '/.installed'
+      ];
+
+      for (let cmd of setupCmds) {
+        let r: string = this.runCmd(cmd);
+        if (r.includes('exit code')) {
+          this.output += 'WARN: ' + cmd.substring(0, 50) + '... → ' + r.trim() + '\n';
+        }
+      }
+
+      // Verify
+      let verifyResult: string = this.runCmd('ls ' + this.pythonBase + '/bin/python3.11');
+      if (verifyResult.includes('exit code')) {
+        this.status = 'Install Failed';
+        this.output += 'verify failed: ' + verifyResult;
+      } else {
+        this.pythonReady = true;
+        this.status = 'Ready (installed!)';
+        this.output += '\nPython runtime extracted successfully!';
+      }
+      this.isRunning = false;
+    }).catch((err: Error) => {
+      this.status = 'Install Failed';
+      this.output = 'Error reading rawfile: ' + err.message;
+      this.isRunning = false;
+    });
   }
 
   testEcho(): void {
@@ -55,15 +132,33 @@ struct PythonRunner {
     this.status = 'Checking...';
     try {
       let lines: string[] = [];
-      lines.push('base=' + this.pythonBase);
+      lines.push('filesDir=' + this.filesDir);
+      lines.push('pythonBase=' + this.pythonBase);
       lines.push('== ls python/bin ==\n' + this.runCmd('ls -la ' + this.pythonBase + '/bin/'));
       lines.push('== ls python/lib ==\n' + this.runCmd('ls ' + this.pythonBase + '/lib/'));
-      lines.push('== with env ==\n' + this.runCmd('LD_LIBRARY_PATH=' + this.pythonBase + '/lib PYTHONHOME=' + this.pythonBase + ' ' + this.pythonBase + '/bin/python3.11 -c "import sys; print(sys.version)"'));
+      lines.push('== python version ==\n' + this.runCmd(
+        'LD_LIBRARY_PATH=' + this.pythonBase + '/lib PYTHONHOME=' + this.pythonBase +
+        ' ' + this.pythonBase + '/bin/python3.11 -c "import sys; print(sys.version)"'));
       this.output = lines.join('\n');
       this.status = 'Debug Done';
     } catch (e) {
       this.output = 'Error: ' + JSON.stringify(e);
       this.status = 'Debug Failed';
+    }
+    this.isRunning = false;
+  }
+
+  resetPython(): void {
+    this.isRunning = true;
+    this.status = 'Resetting...';
+    try {
+      this.runCmd('rm -rf ' + this.pythonBase);
+      this.pythonReady = false;
+      this.output = 'Python runtime removed. Re-enter page to extract again.';
+      this.status = 'Reset Done';
+    } catch (e) {
+      this.output = 'Error: ' + JSON.stringify(e);
+      this.status = 'Reset Failed';
     }
     this.isRunning = false;
   }
@@ -78,13 +173,24 @@ struct PythonRunner {
             .width(12)
             .height(12)
             .fill(this.isRunning ? Color.Orange :
-              (this.status.includes('OK') ? Color.Green :
+              (this.status.includes('OK') || this.status.includes('Ready') ? Color.Green :
                 (this.status.includes('Fail') ? Color.Red : Color.Gray)))
             .margin({ right: 8 })
           Text(this.status)
             .fontSize(16)
         }
         .margin({ bottom: 20 })
+
+        if (!this.pythonReady) {
+          Button('Install Python (23MB)')
+            .width('80%')
+            .height(50)
+            .fontSize(18)
+            .backgroundColor('#4CAF50')
+            .margin({ bottom: 15 })
+            .enabled(!this.isRunning)
+            .onClick(() => { this.installPython(); })
+        }
 
         Button('Test Echo')
           .width('80%')
@@ -100,7 +206,7 @@ struct PythonRunner {
           .fontSize(16)
           .backgroundColor('#2196F3')
           .margin({ bottom: 10 })
-          .enabled(!this.isRunning)
+          .enabled(!this.isRunning && this.pythonReady)
           .onClick(() => { this.testPython(); })
 
         Button('Debug Info')
@@ -108,9 +214,18 @@ struct PythonRunner {
           .height(45)
           .fontSize(16)
           .backgroundColor('#FF9800')
-          .margin({ bottom: 20 })
+          .margin({ bottom: 10 })
           .enabled(!this.isRunning)
           .onClick(() => { this.debugInfo(); })
+
+        Button('Reset Python')
+          .width('80%')
+          .height(45)
+          .fontSize(16)
+          .backgroundColor('#F44336')
+          .margin({ bottom: 20 })
+          .enabled(!this.isRunning)
+          .onClick(() => { this.resetPython(); })
 
         Text('Output:')
           .fontSize(14)
