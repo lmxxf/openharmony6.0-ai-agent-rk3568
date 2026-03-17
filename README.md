@@ -433,7 +433,7 @@ UI 显示结果                  python3.11 -c "print(...)"
 |------|------|
 | `product/phone/src/main/cpp/exec_napi.cpp` | NAPI 模块：`runCommand(cmd)` fork+execve 执行命令 |
 | `product/phone/src/main/ets/pages/pythonRunner.ets` | UI 页面 + rawfile 解压逻辑 |
-| `product/phone/src/main/resources/rawfile/python-runtime.tar.gz` | Python 3.11.11 运行时（bin + lib + stdlib） |
+| `product/phone/src/main/resources/rawfile/python-runtime.tar.gz` | Python 3.11.11 运行时（bin + lib + stdlib + LangChain 依赖链） |
 | `build_exec_napi.sh` | 交叉编译 libexec_napi.so |
 
 ### Python 运行时内容
@@ -447,16 +447,46 @@ python/
 │   ├── libpython3.11.so.1.0    # Python 主库
 │   ├── libcrypto.so.3          # OpenSSL
 │   ├── libssl.so.3             # OpenSSL
-│   └── python3.11/             # 标准库（精简版，去掉 test/idlelib/tkinter 等）
+│   └── python3.11/             # 标准库 + site-packages
 │       ├── encodings/
 │       ├── json/
 │       ├── ssl.py
 │       ├── lib-dynload/        # 64 个 C 扩展模块 (.so)
+│       ├── site-packages/      # LangChain 全依赖链
+│       │   ├── pydantic_core/  # Rust .so
+│       │   ├── langchain_core/
+│       │   ├── openai/
+│       │   ├── jiter/          # Rust .so
+│       │   ├── uuid_utils/     # Rust .so
+│       │   ├── xxhash/         # C .so
+│       │   ├── certifi/        # 含 cacert.pem（SSL 证书）
+│       │   └── ...（30+ 个包）
 │       └── ...
 └── .installed                  # marker 文件，表示已解压
 ```
 
 Python 运行时由 [langchain-on-openharmony](https://github.com/lmxxf/langchain-on-openharmony) 项目交叉编译，使用 OH 的 Clang 15 + musl sysroot，详见该项目的 DevHistory.md。
+
+### LangChain + DeepSeek API 验证
+
+Python Runner 页面有 **Run LangChain + DeepSeek** 按钮（紫色），点击后在 App 沙箱内执行：
+
+```
+Python 3.11 → langchain_core → openai SDK → HTTPS/TLS → DeepSeek API → AIMessage
+```
+
+验证结果（P7885）：
+```
+Python 3.11.11
+langchain_core: OK
+openai SDK: OK
+Response: Hello from OpenHarmony, the open-source operating system
+          shaping the future of smart devices!
+Type: AIMessage
+=== LangChain + DeepSeek on OpenHarmony: SUCCESS ===
+```
+
+**注意**：刷机后板子时间会重置到 2008 年，SSL 证书验证会报 `certificate is not yet valid`。需要先校时：`hdc shell 'date MMDDHHmmYYYY.SS'`
 
 ---
 

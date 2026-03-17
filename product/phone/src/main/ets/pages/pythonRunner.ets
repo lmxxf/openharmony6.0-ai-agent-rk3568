@@ -127,6 +127,41 @@ struct PythonRunner {
     this.isRunning = false;
   }
 
+  testLangChain(): void {
+    this.isRunning = true;
+    this.status = 'Calling DeepSeek via LangChain...';
+    this.output = '';
+    try {
+      let pyBin: string = this.pythonBase + '/bin/python3.11';
+      let env: string = 'LD_LIBRARY_PATH=' + this.pythonBase + '/lib'
+        + ' PYTHONHOME=' + this.pythonBase;
+      let script: string = [
+        "import sys",
+        "print('Python', sys.version.split()[0])",
+        "from langchain_core.messages import HumanMessage, AIMessage",
+        "print('langchain_core: OK')",
+        "from openai import OpenAI",
+        "print('openai SDK: OK')",
+        "client = OpenAI(api_key='sk-e1747930417044149d12302141c9e4fa', base_url='https://api.deepseek.com/v1')",
+        "resp = client.chat.completions.create(model='deepseek-chat', messages=[{'role':'user','content':'Say hello from OpenHarmony in one sentence.'}], max_tokens=50)",
+        "text = resp.choices[0].message.content",
+        "msg = AIMessage(content=text)",
+        "print('Response:', text)",
+        "print('Type:', type(msg).__name__)",
+        "print()",
+        "print('=== LangChain + DeepSeek on OpenHarmony: SUCCESS ===')"
+      ].join('; ');
+      let cmd: string = env + ' ' + pyBin + " -c \"" + script + "\"";
+      this.output = this.runCmd(cmd);
+      this.status = this.output.includes('SUCCESS') ? 'LangChain OK' :
+        (this.output.includes('exit code') ? 'LangChain Failed' : 'LangChain Done');
+    } catch (e) {
+      this.output = 'Error: ' + JSON.stringify(e);
+      this.status = 'LangChain Failed';
+    }
+    this.isRunning = false;
+  }
+
   debugInfo(): void {
     this.isRunning = true;
     this.status = 'Checking...';
@@ -208,6 +243,15 @@ struct PythonRunner {
           .margin({ bottom: 10 })
           .enabled(!this.isRunning && this.pythonReady)
           .onClick(() => { this.testPython(); })
+
+        Button('Run LangChain + DeepSeek')
+          .width('80%')
+          .height(45)
+          .fontSize(16)
+          .backgroundColor('#9C27B0')
+          .margin({ bottom: 10 })
+          .enabled(!this.isRunning && this.pythonReady)
+          .onClick(() => { this.testLangChain(); })
 
         Button('Debug Info')
           .width('80%')
