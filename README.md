@@ -13,6 +13,7 @@
   - ☁️ **云端模式**：DeepSeek API，快速响应，流式输出
 - **MCP Tool Calling**：通过 DeepSeek Function Calling 实现设备控制 Agent，LLM 自主决定调用工具（[详见 MCP 实现文档](mcp-impl.md)）
 - **RAG 知识检索**：端侧轻量级 RAG，本地知识库随 HAP 打包，关键词检索注入 system prompt（[详见 RAG 实现文档](rag-impl.md)）
+- **🐍 Python Runner**：App 内嵌 Python 3.11 运行时，通过 NAPI fork+execve 在系统 App 沙箱内执行 Python 脚本（[详见下方](#-python-runner)）
 - **通用 ARM64 适配**：支持所有 ARMv8-A 架构设备（RK3568、展锐 P7885 等），开启 NEON 指令集优化
 - **系统级集成**：直接注入原生 Settings 列表，无需作为第三方应用安装，拥有更高的系统权限
 - **异步推理**：使用 NAPI 异步工作线程（本地）或 HTTP 流式请求（云端），推理过程不阻塞 UI
@@ -352,30 +353,110 @@ settings/
 ├── llama_cpp/                    # llama.cpp 源码和编译配置
 │   └── build_arm64/              # ARM64 编译产物
 ├── product/phone/
-│   ├── src/main/cpp/             # NAPI 封装（本地推理）
-│   │   ├── llama_napi.cpp        # NAPI 实现
+│   ├── src/main/cpp/             # NAPI 封装
+│   │   ├── llama_napi.cpp        # 本地推理 NAPI
+│   │   ├── exec_napi.cpp         # Python Runner NAPI（fork+execve）
 │   │   └── types/libllama_napi/  # 类型声明
 │   ├── src/main/ets/
 │   │   ├── pages/
-│   │   │   ├── settingList.ets   # 主列表（含 AI 入口）
-│   │   │   └── aiAssistant.ets   # AI 聊天页面（本地+云端双模式）
+│   │   │   ├── settingList.ets   # 主列表（含 AI + Python Runner 入口）
+│   │   │   ├── aiAssistant.ets   # AI 聊天页面（本地+云端双模式）
+│   │   │   └── pythonRunner.ets  # Python Runner 页面
 │   │   └── res/image/
 │   │       └── ic_ai.svg         # AI 助手图标
 │   ├── src/main/resources/rawfile/
 │   │   ├── api_config.json       # DeepSeek API 配置（gitignore）
 │   │   ├── api_config.json.example  # 配置示例
 │   │   ├── cacert.pem            # Mozilla CA 根证书包（修复 SSL）
+│   │   ├── python-runtime.tar.gz # Python 3.11 运行时（26MB，自动解压）
 │   │   └── knowledge/            # [RAG] 知识库文件
 │   │       ├── kb_index.json     # 文档元数据索引
 │   │       ├── device_manual.txt # 设备使用手册
 │   │       ├── oh6_features.txt  # OpenHarmony 6.0 特性
 │   │       └── settings_faq.txt  # 常见问题 Q&A
 │   └── libs/arm64-v8a/           # 预编译的 .so 库
-├── build_napi_arm64.sh           # NAPI 编译脚本
+├── build_napi_arm64.sh           # llama NAPI 编译脚本
+├── build_exec_napi.sh            # Python Runner NAPI 编译脚本
 ├── build_all_ai_arm64.sh         # 一键编译脚本
 ├── 开发日志.md                    # 详细开发记录
 └── README.md                      # 本文件
 ```
+
+---
+
+## 🐍 Python Runner
+
+> **分支：`langchain-python-test`**
+
+在系统设置 App 内嵌 Python 3.11 运行时，无需修改系统镜像。Python 运行时（26MB）打包在 HAP 的 rawfile 中，首次使用时自动解压到 App 沙箱。
+
+### 原理
+
+```
+ArkTS UI (pythonRunner.ets)
+    │ import 'libexec_napi.so'
+    ↓
+C++ NAPI (exec_napi.cpp) ── fork() → execve("/bin/sh", "-c", cmd)
+    │                                    │
+    │ pipe read stdout+stderr            ↓
+    │                        LD_LIBRARY_PATH=.../python/lib
+    ↓                        PYTHONHOME=.../python
+UI 显示结果                  python3.11 -c "print(...)"
+```
+
+### 为什么用 NAPI fork+execve 而不是 ArkTS API
+
+- `process.runCmd()` 在 SDK 20 中被删除（OH 安全收紧）
+- `popen()` 在 App 进程中 PATH 为空，外部命令全返回 127
+- `fork + execve("/bin/sh")` 可以在子进程中设置 PATH 和环境变量
+
+### 为什么必须是系统 App
+
+普通 App 有独立的 mount namespace，连 `/data/local/tmp/` 都看不到（返回 "No such file or directory"）。系统 App（`com.ohos.settings`）权限更高，可以在沙箱 filesDir 内执行二进制文件。
+
+### 使用方式
+
+1. 切换到 `langchain-python-test` 分支
+2. 编译 NAPI 和 HAP：
+```bash
+./build_exec_napi.sh    # 编译 libexec_napi.so（20KB）
+./build.sh              # 编译 HAP（含 26MB Python 运行时）
+```
+3. 安装 HAP 到设备
+4. 打开设置 → **Python Runner**
+5. 点 **Install Python (23MB)** → 等待解压完成
+6. 点 **Run Python** → 显示 Python 3.11.11 输出
+
+### 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| `product/phone/src/main/cpp/exec_napi.cpp` | NAPI 模块：`runCommand(cmd)` fork+execve 执行命令 |
+| `product/phone/src/main/ets/pages/pythonRunner.ets` | UI 页面 + rawfile 解压逻辑 |
+| `product/phone/src/main/resources/rawfile/python-runtime.tar.gz` | Python 3.11.11 运行时（bin + lib + stdlib） |
+| `build_exec_napi.sh` | 交叉编译 libexec_napi.so |
+
+### Python 运行时内容
+
+tar.gz 解压后的目录结构（部署到 App 沙箱 filesDir）：
+
+```
+python/
+├── bin/python3.11              # CPython 解释器（动态链接）
+├── lib/
+│   ├── libpython3.11.so.1.0    # Python 主库
+│   ├── libcrypto.so.3          # OpenSSL
+│   ├── libssl.so.3             # OpenSSL
+│   └── python3.11/             # 标准库（精简版，去掉 test/idlelib/tkinter 等）
+│       ├── encodings/
+│       ├── json/
+│       ├── ssl.py
+│       ├── lib-dynload/        # 64 个 C 扩展模块 (.so)
+│       └── ...
+└── .installed                  # marker 文件，表示已解压
+```
+
+Python 运行时由 [langchain-on-openharmony](https://github.com/lmxxf/langchain-on-openharmony) 项目交叉编译，使用 OH 的 Clang 15 + musl sysroot，详见该项目的 DevHistory.md。
 
 ---
 

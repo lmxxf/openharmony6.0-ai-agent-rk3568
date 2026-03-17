@@ -2,7 +2,7 @@
   "app": {
     "bundleName": "com.ohos.settings",
     "vendor": "example",
-    "versionCode": 60251222,
+    "versionCode": 90000002,
     "versionName": "6.0.0.251222",
     "icon": "$media:app_icon",
     "label": "$string:app_name",
