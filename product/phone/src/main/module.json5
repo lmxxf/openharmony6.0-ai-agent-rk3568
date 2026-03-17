@@ -89,6 +89,10 @@
 
     "requestPermissions": [
       {
+        "name": "ohos.permission.CAMERA",
+        "reason": "$string:MANAGE_LOCAL_ACCOUNTS"
+      },
+      {
         "name": "ohos.permission.MANAGE_LOCAL_ACCOUNTS",
         "reason": "$string:MANAGE_LOCAL_ACCOUNTS"
       },

@@ -8,6 +8,27 @@ import ConfigData from '../../../../../../common/utils/src/main/ets/default/base
 import HeadComponent from '../../../../../../common/component/src/main/ets/default/headComponent';
 import execNapi from 'libexec_napi.so';
 
+// Interfaces for ArkTS strict mode
+interface ToolResultData {
+  path: string;
+  status: string;
+}
+
+interface BridgeMessage {
+  type: string;
+  tool?: string;
+  result?: ToolResultData;
+  message?: string;
+}
+
+interface AgentResponse {
+  type: string;
+  content?: string;
+  tool?: string;
+  message?: string;
+  python_version?: string;
+}
+
 @Entry
 @Component
 struct PythonRunner {
@@ -183,6 +204,109 @@ struct PythonRunner {
     this.isRunning = false;
   }
 
+  // ============================================================
+  // Daemon mode: persistent Python subprocess with stdin/stdout pipes
+  // ============================================================
+
+  @State daemonRunning: boolean = false;
+  @State chatInput: string = '';
+
+  startAgent(): void {
+    this.isRunning = true;
+    this.status = 'Starting agent daemon...';
+    this.output = '';
+    try {
+      // First, copy agent_daemon.py from rawfile to filesDir
+      let ctx = getContext(this);
+      ctx.resourceManager.getRawFileContent('agent_daemon.py').then((data: Uint8Array) => {
+        let scriptPath: string = this.filesDir + '/agent_daemon.py';
+        let file: fs.File = fs.openSync(scriptPath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
+        fs.writeSync(file.fd, data.buffer);
+        fs.closeSync(file);
+
+        // Start daemon
+        let ok: boolean = execNapi.startDaemon(this.pythonBase, scriptPath);
+        if (!ok) {
+          this.status = 'Daemon start failed';
+          this.output = 'startDaemon returned false';
+          this.isRunning = false;
+          return;
+        }
+
+        // Read the "ready" message
+        let readyMsg: string = execNapi.readMessage();
+        this.output = 'daemon: ' + readyMsg + '\n';
+        this.daemonRunning = true;
+        this.status = 'Agent running';
+        this.isRunning = false;
+      }).catch((err: Error) => {
+        this.status = 'Failed to read agent script';
+        this.output = 'Error: ' + err.message;
+        this.isRunning = false;
+      });
+    } catch (e) {
+      this.status = 'Daemon start error';
+      this.output = 'Error: ' + JSON.stringify(e);
+      this.isRunning = false;
+    }
+  }
+
+  sendChat(): void {
+    if (!this.chatInput || !this.daemonRunning) return;
+    this.isRunning = true;
+    this.status = 'Sending...';
+    let userMsg: string = this.chatInput;
+    this.chatInput = '';
+
+    try {
+      let chatMsg: BridgeMessage = { type: 'chat', message: userMsg };
+      execNapi.sendMessage(JSON.stringify(chatMsg));
+      this.output += '\n[You] ' + userMsg + '\n';
+
+      // Read response (may be tool_call or response)
+      let reply: string = execNapi.readMessage();
+      let parsed: AgentResponse = JSON.parse(reply) as AgentResponse;
+
+      if (parsed.type === 'tool_call') {
+        let toolName: string = parsed.tool || 'unknown';
+        this.output += '[Tool Call] ' + toolName + '\n';
+
+        // Simulate tool execution (for now, fake camera result)
+        let resultData: ToolResultData = { path: this.filesDir + '/fake_photo.jpg', status: 'simulated' };
+        let toolResult: BridgeMessage = { type: 'tool_result', tool: toolName, result: resultData };
+        execNapi.sendMessage(JSON.stringify(toolResult));
+
+        // Read final response after tool
+        let finalReply: string = execNapi.readMessage();
+        let finalParsed: AgentResponse = JSON.parse(finalReply) as AgentResponse;
+        this.output += '[Agent] ' + (finalParsed.content || '') + '\n';
+      } else if (parsed.type === 'response') {
+        this.output += '[Agent] ' + (parsed.content || '') + '\n';
+      } else {
+        this.output += '[Raw] ' + reply + '\n';
+      }
+
+      this.status = 'Agent running';
+    } catch (e) {
+      this.output += '[Error] ' + JSON.stringify(e) + '\n';
+      this.status = 'Chat error';
+    }
+    this.isRunning = false;
+  }
+
+  stopAgent(): void {
+    try {
+      let shutdownMsg: BridgeMessage = { type: 'shutdown' };
+      execNapi.sendMessage(JSON.stringify(shutdownMsg));
+      execNapi.stopDaemon();
+    } catch (e) {
+      // ignore
+    }
+    this.daemonRunning = false;
+    this.status = 'Agent stopped';
+    this.output += '\n[System] Agent daemon stopped\n';
+  }
+
   resetPython(): void {
     this.isRunning = true;
     this.status = 'Resetting...';
@@ -270,6 +394,47 @@ struct PythonRunner {
           .margin({ bottom: 20 })
           .enabled(!this.isRunning)
           .onClick(() => { this.resetPython(); })
+
+        // ---- Agent Daemon Section ----
+        Divider().margin({ bottom: 10 })
+
+        if (!this.daemonRunning) {
+          Button('Start Agent Daemon')
+            .width('80%')
+            .height(45)
+            .fontSize(16)
+            .backgroundColor('#00BCD4')
+            .margin({ bottom: 10 })
+            .enabled(!this.isRunning && this.pythonReady)
+            .onClick(() => { this.startAgent(); })
+        } else {
+          Row() {
+            TextInput({ placeholder: 'Ask the agent...', text: this.chatInput })
+              .width('65%')
+              .height(45)
+              .fontSize(14)
+              .onChange((value: string) => { this.chatInput = value; })
+
+            Button('Send')
+              .width('30%')
+              .height(45)
+              .fontSize(14)
+              .margin({ left: '3%' })
+              .backgroundColor('#00BCD4')
+              .enabled(!this.isRunning)
+              .onClick(() => { this.sendChat(); })
+          }
+          .width('80%')
+          .margin({ bottom: 10 })
+
+          Button('Stop Agent')
+            .width('80%')
+            .height(35)
+            .fontSize(14)
+            .backgroundColor('#795548')
+            .margin({ bottom: 10 })
+            .onClick(() => { this.stopAgent(); })
+        }
 
         Text('Output:')
           .fontSize(14)

@@ -488,6 +488,40 @@ Type: AIMessage
 
 **注意**：刷机后板子时间会重置到 2008 年，SSL 证书验证会报 `certificate is not yet valid`。需要先校时：`hdc shell 'date MMDDHHmmYYYY.SS'`
 
+### Agent Daemon 模式（ArkTS ↔ Python 双向通信）
+
+除了一次性执行 Python 脚本，Python Runner 还支持 **daemon 模式**——Python 作为常驻子进程，通过 stdin/stdout 管道与 ArkTS 实时双向通信。
+
+**通信协议**：JSON Lines（每行一个 JSON 对象）
+
+```
+ArkTS                    C++ NAPI (管道)              Python daemon
+  │                        │                            │
+  │ "帮我拍个照"            │                            │
+  ├──sendMessage──────────>│──write(stdin)─────────────>│
+  │                        │                            │ 识别 → tool_call
+  │                        │<──read(stdout)─────────────┤ {"type":"tool_call","tool":"camera"}
+  │  收到 tool_call         │                            │
+  │  执行拍照               │                            │
+  │  sendMessage(result)   │                            │
+  ├──sendMessage──────────>│──write(stdin)─────────────>│
+  │                        │                            │ 收到结果 → response
+  │                        │<──read(stdout)─────────────┤ {"type":"response","content":"拍完了"}
+  │  显示结果               │                            │
+```
+
+**使用方式**：
+1. 点 **Start Agent Daemon** → Python 常驻启动，输出 `ready`
+2. 在输入框输入消息，点 **Send**
+3. 输入"拍照"相关词会触发 tool_call → ArkTS 模拟执行 → 返回结果
+4. 点 **Stop Agent** 终止
+
+**NAPI 新增函数**：`startDaemon()` / `sendMessage()` / `readMessage()` / `stopDaemon()` / `isDaemonRunning()`
+
+**相关文件**：
+- `product/phone/src/main/cpp/exec_napi.cpp`：管道管理 + 消息收发
+- `product/phone/src/main/resources/rawfile/agent_daemon.py`：Python 消息循环
+
 ---
 
 ## 🧪 测试环境
